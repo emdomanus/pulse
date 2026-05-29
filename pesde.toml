@@ -1,0 +1,26 @@
+name = "emdomanus/pulse"
+version = "0.1.0"
+description = "A small generic sequence playback runtime for Roblox."
+license = "MIT"
+authors = ["emdomanus"]
+repository = "https://github.com/emdomanus/pulse"
+
+includes = [
+	"pesde.toml",
+	"LICENSE",
+	"README.md",
+	"src/**/*.luau",
+]
+
+[target]
+environment = "roblox"
+lib = "src/init.luau"
+build_files = ["src"]
+
+[indices]
+default = "https://github.com/pesde-pkg/index"
+
+[dependencies]
+advancedUtils = { name = "emdomanus/advanced_utils", version = "^0.1.1" }
+tempo = { name = "emdomanus/tempo", version = "^0.1.1" }
+

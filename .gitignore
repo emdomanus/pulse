@@ -1,0 +1,7 @@
+roblox_packages/
+*.rbxlx
+*.rbxm
+*-sourcemap.json
+sourcemap.json
+*.tar.gz
+
