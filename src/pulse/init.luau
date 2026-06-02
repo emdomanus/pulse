@@ -12,8 +12,8 @@ local Builder = Components.builder
 export type Clock = Types.Clock
 export type Phase<PhaseT> = Types.Phase<PhaseT>
 export type PhaseName<PhaseT> = Types.PhaseName<PhaseT>
-export type TempoHandle<PhaseT> = Types.TempoHandle<PhaseT>
-export type HookHandle<T...> = Types.HookHandle<T...>
+export type Tempo<PhaseT> = Types.Tempo<PhaseT>
+export type Hook<T...> = Types.Hook<T...>
 
 export type Status = Types.Status
 export type CompletionReason = Types.CompletionReason

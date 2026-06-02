@@ -1,5 +1,5 @@
 name = "emdomanus/pulse"
-version = "0.1.0"
+version = "0.1.1"
 description = "A small generic sequence playback runtime for Roblox."
 license = "MIT"
 authors = ["emdomanus"]
@@ -21,6 +21,5 @@ build_files = ["src"]
 default = "https://github.com/pesde-pkg/index"
 
 [dependencies]
-advancedUtils = { name = "emdomanus/advanced_utils", version = "^0.1.1" }
-tempo = { name = "emdomanus/tempo", version = "^0.1.1" }
-
+tempo = { name = "emdomanus/tempo", version = "^0.1.2" }
+hook = { name = "emdomanus/hook", version = "^0.1.1" }

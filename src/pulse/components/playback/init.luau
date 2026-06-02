@@ -2,7 +2,7 @@
 --!optimize 2
 --!native
 
-local AdvancedUtils = require(script.Parent.Parent.Parent.externalPackages.advancedUtils)
+local HookModule = require(script.Parent.Parent.Parent.externalPackages.hook)
 local DefTypes = require(script.Parent.Parent.types.def)
 local ContextComponent = require(script.Parent.context)
 local PlaybackTypes = require(script.Parent.Parent.types.components.playback)
@@ -17,7 +17,8 @@ type PlaybackImpl<StepT = StepId> = PlaybackTypes.PlaybackImpl<StepT>
 local Playback = {}
 Playback.__index = Playback
 
-local Hook = AdvancedUtils.core.hook
+type Hook<T...> = HookModule.Hook<T...>
+
 local MAX_LOOP_CATCH_UP = 16
 
 local function copyParams(baseParams: { [string]: any }, overrideParams: { [string]: any }?): { [string]: any }
@@ -74,7 +75,7 @@ local function runCleanup<StepT>(self: PlaybackImpl<StepT>): any?
 	return firstError
 end
 
-local function fireObserverHook(hook: any, ...: any)
+local function fireObserverHook<T...>(hook: Hook<T...>, ...: T...)
 	local ok, hookErr = pcall(hook.fire, hook, ...)
 
 	if not ok then
@@ -308,10 +309,10 @@ function Playback.new<StepT>(
 	local timePosition = request.timePosition or 0
 
 	local self: PlaybackImpl<StepT> = setmetatable({
-		Ended = Hook.new(),
-		Looped = Hook.new(),
-		ParamChanged = Hook.new(),
-		Signaled = Hook.new(),
+		Ended = HookModule.new(),
+		Looped = HookModule.new(),
+		ParamChanged = HookModule.new(),
+		Signaled = HookModule.new(),
 		_sequence = sequence,
 		_status = "idle",
 		_step = nil,

@@ -2,25 +2,25 @@
 # It is not intended for manual editing.
 format = 2
 name = "emdomanus/pulse"
-version = "0.1.0"
+version = "0.1.1"
 target = "roblox"
 
-[graph."emdomanus/advanced_utils@0.1.1 roblox"]
-direct = ["advancedUtils", { name = "emdomanus/advanced_utils", version = "^0.1.1", index = "default" }, "standard"]
+[graph."emdomanus/hook@0.1.1 roblox"]
+direct = ["hook", { name = "emdomanus/hook", version = "^0.1.1", index = "default" }, "standard"]
 
-[graph."emdomanus/advanced_utils@0.1.1 roblox".pkg_ref]
+[graph."emdomanus/hook@0.1.1 roblox".pkg_ref]
 ref_ty = "pesde"
 index_url = "https://github.com/pesde-pkg/index"
 
-[graph."emdomanus/tempo@0.1.1 roblox"]
-direct = ["tempo", { name = "emdomanus/tempo", version = "^0.1.1", index = "default" }, "standard"]
+[graph."emdomanus/tempo@0.1.2 roblox"]
+direct = ["tempo", { name = "emdomanus/tempo", version = "^0.1.2", index = "default" }, "standard"]
 
-[graph."emdomanus/tempo@0.1.1 roblox".dependencies]
-advancedUtils = ["emdomanus/advanced_utils@0.1.1 roblox", "standard"]
+[graph."emdomanus/tempo@0.1.2 roblox".dependencies]
+hook = ["emdomanus/hook@0.1.1 roblox", "standard"]
 
-[graph."emdomanus/tempo@0.1.1 roblox".pkg_ref]
+[graph."emdomanus/tempo@0.1.2 roblox".pkg_ref]
 ref_ty = "pesde"
 index_url = "https://github.com/pesde-pkg/index"
 
-[graph."emdomanus/tempo@0.1.1 roblox".pkg_ref.dependencies]
-advancedUtils = [{ name = "emdomanus/advanced_utils", version = "^0.1.0", index = "https://github.com/pesde-pkg/index" }, "standard"]
+[graph."emdomanus/tempo@0.1.2 roblox".pkg_ref.dependencies]
+hook = [{ name = "emdomanus/hook", version = "^0.1.0", index = "https://github.com/pesde-pkg/index" }, "standard"]

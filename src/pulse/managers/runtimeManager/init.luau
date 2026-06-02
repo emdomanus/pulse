@@ -23,11 +23,11 @@ function RuntimeManager.new<PhaseT>(_options: RuntimeOptions<PhaseT>): Runtime<P
 	local phase = options.phase or options.tempo.phases.heartbeat
 	self._bindingId = options.tempo:bindPhase(phase, function(dt: number)
 		for index = #self._playbacks, 1, -1 do
-			local playbackHandle = self._playbacks[index]
-			local playbackImpl = playbackHandle :: any
+			local playback = self._playbacks[index]
+			local playbackImpl = playback :: any
 			playbackImpl:_update(dt)
 
-			if not playbackHandle:isAlive() then
+			if not playback:isAlive() then
 				local last = self._playbacks[#self._playbacks]
 				self._playbacks[index] = last
 				self._playbacks[#self._playbacks] = nil :: any

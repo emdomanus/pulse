@@ -11,7 +11,7 @@ export type Status = DefTypes.Status
 export type CompletionReason = DefTypes.CompletionReason
 export type Completion = DefTypes.Completion
 export type Params = DefTypes.Params
-export type HookHandle<T...> = DefTypes.HookHandle<T...>
+export type Hook<T...> = DefTypes.Hook<T...>
 export type PlayRequest<StepT = StepId> = DefTypes.PlayRequest<StepT>
 export type SeekRequest<StepT = StepId> = DefTypes.SeekRequest<StepT>
 export type Context<StepT = StepId> = ContextTypes.Context<StepT>
@@ -19,10 +19,10 @@ export type Sequence<StepT = StepId> = SequenceTypes.Sequence<StepT>
 type SequenceImpl<StepT = StepId> = SequenceTypes.SequenceImpl<StepT>
 
 export type Playback<StepT = StepId> = {
-	Ended: HookHandle<Completion>,
-	Looped: HookHandle<number>,
-	ParamChanged: HookHandle<string, any, any?>,
-	Signaled: HookHandle<string, any?>,
+	Ended: Hook<Completion>,
+	Looped: Hook<number>,
+	ParamChanged: Hook<string, any, any?>,
+	Signaled: Hook<string, any?>,
 
 	play: (self: Playback<StepT>) -> Playback<StepT>,
 	pause: (self: Playback<StepT>) -> (),

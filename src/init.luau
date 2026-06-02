@@ -7,8 +7,8 @@ local Pulse = require(script.pulse)
 export type Clock = Pulse.Clock
 export type Phase<PhaseT> = Pulse.Phase<PhaseT>
 export type PhaseName<PhaseT> = Pulse.PhaseName<PhaseT>
-export type TempoHandle<PhaseT> = Pulse.TempoHandle<PhaseT>
-export type HookHandle<T...> = Pulse.HookHandle<T...>
+export type Tempo<PhaseT> = Pulse.Tempo<PhaseT>
+export type Hook<T...> = Pulse.Hook<T...>
 
 export type Status = Pulse.Status
 export type CompletionReason = Pulse.CompletionReason

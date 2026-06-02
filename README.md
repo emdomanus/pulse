@@ -17,7 +17,7 @@ pesde install
 
 The package depends on:
 
-- `emdomanus/advanced_utils` for hook-style events and small utilities.
+- `emdomanus/hook` for hook-style observer events.
 - `emdomanus/tempo` for clocks, phases, and scheduler integration.
 
 Initial package shape:

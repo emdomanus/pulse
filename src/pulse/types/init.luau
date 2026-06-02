@@ -13,8 +13,8 @@ local PulseServiceTypes = require(script.services.pulseService)
 export type Clock = DefTypes.Clock
 export type Phase<PhaseT> = DefTypes.Phase<PhaseT>
 export type PhaseName<PhaseT> = DefTypes.PhaseName<PhaseT>
-export type TempoHandle<PhaseT> = DefTypes.TempoHandle<PhaseT>
-export type HookHandle<T...> = DefTypes.HookHandle<T...>
+export type Tempo<PhaseT> = DefTypes.Tempo<PhaseT>
+export type Hook<T...> = DefTypes.Hook<T...>
 
 export type Status = DefTypes.Status
 export type CompletionReason = DefTypes.CompletionReason

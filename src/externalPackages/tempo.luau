@@ -11,7 +11,6 @@ export type Phase<PhaseT> = main.Phase<PhaseT>
 export type ScheduledCallback = main.ScheduledCallback
 export type PhaseCallback = main.PhaseCallback
 export type Options = main.Options
-export type TempoHandle<PhaseT> = main.TempoHandle<PhaseT>
+export type Tempo<PhaseT> = main.Tempo<PhaseT>
 
 return main
-

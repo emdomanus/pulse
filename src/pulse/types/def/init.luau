@@ -2,14 +2,14 @@
 --!optimize 2
 --!native
 
-local AdvancedUtils = require(script.Parent.Parent.Parent.externalPackages.advancedUtils)
-local Tempo = require(script.Parent.Parent.Parent.externalPackages.tempo)
+local HookModule = require(script.Parent.Parent.Parent.externalPackages.hook)
+local TempoModule = require(script.Parent.Parent.Parent.externalPackages.tempo)
 
-export type Clock = Tempo.Clock
-export type Phase<PhaseT> = Tempo.Phase<PhaseT>
-export type PhaseName<PhaseT> = Tempo.PhaseName<PhaseT>
-export type TempoHandle<PhaseT> = Tempo.TempoHandle<PhaseT>
-export type HookHandle<T...> = AdvancedUtils.HookHandle<T...>
+export type Clock = TempoModule.Clock
+export type Phase<PhaseT> = TempoModule.Phase<PhaseT>
+export type PhaseName<PhaseT> = TempoModule.PhaseName<PhaseT>
+export type Tempo<PhaseT> = TempoModule.Tempo<PhaseT>
+export type Hook<T...> = HookModule.Hook<T...>
 
 export type Status =
 	"idle"
@@ -53,7 +53,7 @@ export type PlayRequest<StepT = StepId> = {
 }
 
 export type RuntimeOptions<PhaseT> = {
-	tempo: TempoHandle<PhaseT>,
+	tempo: Tempo<PhaseT>,
 	phase: Phase<PhaseName<PhaseT>> | PhaseName<PhaseT>?,
 }
 
