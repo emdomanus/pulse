@@ -24,14 +24,14 @@ Initial package shape:
 ```lua
 local Pulse = require(ReplicatedStorage.packages.pulse)
 
-local runtime = Pulse.Runtime.new({
+local runtime = Pulse.runtime.new({
 	tempo = tempo,
 	phase = tempo.phases.heartbeat,
 })
 
 type StepId = "start" | "release"
 
-local builder: Pulse.Builder<StepId> = Pulse.define()
+local builder: Pulse.Builder<StepId> = Pulse.builder()
 local sequence = builder
 	:duration(0.5)
 	:cleanupDelay(1)
@@ -115,7 +115,7 @@ alive and signalable while time is paused:
 ```lua
 type StepId = "start" | "hold" | "finish"
 
-local builder: Pulse.Builder<StepId> = Pulse.define()
+local builder: Pulse.Builder<StepId> = Pulse.builder()
 local sequence = builder
 	:duration(2)
 	:step("start", 0)

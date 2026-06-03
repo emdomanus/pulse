@@ -111,7 +111,7 @@ local function log(message: string)
 	print("[Pulse Dev]", message)
 end
 
-local loopBuilder: Pulse.Builder<LoopStepId> = Pulse.define()
+local loopBuilder: Pulse.Builder<LoopStepId> = Pulse.builder()
 local loopSequence = loopBuilder
 	:duration(3)
 	:cleanupDelay(0.75)
@@ -155,7 +155,7 @@ local loopSequence = loopBuilder
 	end)
 	:compile()
 
-local gatedBuilder: Pulse.Builder<GatedStepId> = Pulse.define()
+local gatedBuilder: Pulse.Builder<GatedStepId> = Pulse.builder()
 local gatedSequence = gatedBuilder
 	:duration(2.35)
 	:cleanupDelay(1.25)
@@ -214,7 +214,7 @@ local gatedSequence = gatedBuilder
 	end)
 	:compile()
 
-local cleanupBuilder: Pulse.Builder<CleanupStepId> = Pulse.define()
+local cleanupBuilder: Pulse.Builder<CleanupStepId> = Pulse.builder()
 local cleanupSequence = cleanupBuilder
 	:duration(0.7)
 	:cleanupDelay(1.75)

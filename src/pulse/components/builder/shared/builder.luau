@@ -2,8 +2,8 @@
 --!optimize 2
 --!native
 
-local BuilderTypes = require(script.Parent.Parent.types.components.builder)
-local Sequence = require(script.Parent.sequence)
+local BuilderTypes = require(script.Parent.Parent.Parent.Parent.types.components.builder)
+local Sequence = require(script.Parent.Parent.Parent.sequence.shared.sequence)
 
 export type StepId = BuilderTypes.StepId
 export type Params = BuilderTypes.Params

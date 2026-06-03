@@ -2,8 +2,9 @@
 --!optimize 2
 --!native
 
-local RuntimeManagerTypes = require(script.Parent.Parent.types.managers.runtimeManager)
-local Playback = require(script.Parent.Parent.components.playback)
+local RuntimeManagerTypes = require(script.Parent.Parent.Parent.Parent.types.managers.runtimeManager)
+local PlaybackTypes = require("./../../../types/components/playback")
+local Playback = require(script.Parent.Parent.Parent.Parent.components.playback.shared.playback)
 
 export type Runtime<PhaseT> = RuntimeManagerTypes.Runtime<PhaseT>
 export type RuntimeOptions<PhaseT> = RuntimeManagerTypes.RuntimeOptions<PhaseT>
@@ -20,7 +21,7 @@ function RuntimeManager.new<PhaseT>(_options: RuntimeOptions<PhaseT>): Runtime<P
 		_unbind = nil,
 	}, RuntimeManager) :: any
 
-	local phase = options.phase or options.tempo.phases.heartbeat
+	local phase : PhaseT = options.phase or options.tempo.phases.heartbeat :: any
 	self._unbind = options.tempo:bindPhase(phase, function(dt: number)
 		for index = #self._playbacks, 1, -1 do
 			local playback = self._playbacks[index]
@@ -43,7 +44,7 @@ function RuntimeManager.play<PhaseT, StepT>(
 	sequence: RuntimeManagerTypes.Sequence<StepT>,
 	request: RuntimeManagerTypes.PlayRequest<StepT>?
 ): RuntimeManagerTypes.Playback<StepT>
-	local playback = Playback.new(sequence, request) :: RuntimeManagerTypes.PlaybackImpl<StepT>
+	local playback = Playback.new(sequence, request) :: PlaybackTypes.PlaybackImpl<StepT>
 	table.insert(self._playbacks, playback :: any)
 
 	if request == nil or request.autoPlay ~= false then

@@ -2,8 +2,8 @@
 --!optimize 2
 --!native
 
-local ContextTypes = require(script.Parent.Parent.types.components.context)
-local DefTypes = require(script.Parent.Parent.types.def)
+local ContextTypes = require(script.Parent.Parent.Parent.Parent.types.components.context)
+local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
 
 export type StepId = ContextTypes.StepId
 export type SeekRequest<StepT = StepId> = ContextTypes.SeekRequest<StepT>

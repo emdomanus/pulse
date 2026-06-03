@@ -8,7 +8,6 @@ local ContextTypes = require(script.components.context)
 local PlaybackTypes = require(script.components.playback)
 local SequenceTypes = require(script.components.sequence)
 local RuntimeManagerTypes = require(script.managers.runtimeManager)
-local PulseServiceTypes = require(script.services.pulseService)
 
 export type Clock = DefTypes.Clock
 export type Phase<PhaseT> = DefTypes.Phase<PhaseT>
@@ -45,6 +44,5 @@ export type Builder<StepT = StepId> = BuilderTypes.Builder<StepT>
 export type Playback<StepT = StepId> = PlaybackTypes.Playback<StepT>
 
 export type Runtime<PhaseT> = RuntimeManagerTypes.Runtime<PhaseT>
-export type PulseService = PulseServiceTypes.PulseService
 
 return {}

@@ -37,6 +37,5 @@ export type Sequence<StepT = StepId> = Pulse.Sequence<StepT>
 export type Builder<StepT = StepId> = Pulse.Builder<StepT>
 export type Playback<StepT = StepId> = Pulse.Playback<StepT>
 export type Runtime<PhaseT> = Pulse.Runtime<PhaseT>
-export type PulseService = Pulse.PulseService
 
 return Pulse

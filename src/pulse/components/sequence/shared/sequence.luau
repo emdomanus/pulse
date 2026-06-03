@@ -2,7 +2,7 @@
 --!optimize 2
 --!native
 
-local SequenceTypes = require(script.Parent.Parent.types.components.sequence)
+local SequenceTypes = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
 
 export type StepId = SequenceTypes.StepId
 export type Definition<StepT = StepId> = SequenceTypes.Definition<StepT>
@@ -74,15 +74,17 @@ local function compile<StepT>(_definition: Definition<StepT>, ownsDefinition: bo
 	local seekMode = definition.seekMode or "procedural"
 	local loop = definition.loop == true
 
-	local compiledDefinition = if ownsDefinition then definition else table.clone(definition)
-	compiledDefinition.events = events
+	local compiledDefinition: Definition<StepId> = if ownsDefinition then definition else table.clone(definition) :: any
+
+	assert(compiledDefinition, "compiledDefinition expected at this point")
+	compiledDefinition.events = events :: any
 	compiledDefinition.params = defaultParams
-	compiledDefinition.steps = steps
-	compiledDefinition.transitions = transitions
+	compiledDefinition.steps = steps :: any
+	compiledDefinition.transitions = transitions :: any
 	compiledDefinition.updates = updates
 	compiledDefinition.signals = signals
 	compiledDefinition.cleanupDelay = cleanupDelay
-	compiledDefinition.seekMode = seekMode
+	compiledDefinition.seekMode = seekMode :: any
 	compiledDefinition.loop = loop
 
 	local impl: SequenceImpl<StepT> = {
@@ -98,7 +100,7 @@ local function compile<StepT>(_definition: Definition<StepT>, ownsDefinition: bo
 		signals = signals,
 		definition = compiledDefinition,
 		_sortedEvents = events,
-	}
+	} :: any
 
 	return impl
 end

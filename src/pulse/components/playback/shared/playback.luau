@@ -2,9 +2,9 @@
 --!optimize 2
 --!native
 
-local DefTypes = require(script.Parent.Parent.types.def)
-local ContextComponent = require(script.Parent.context)
-local PlaybackTypes = require(script.Parent.Parent.types.components.playback)
+local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
+local ContextComponent = require(script.Parent.Parent.Parent.context.shared.context)
+local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.types.components.playback)
 
 export type StepId = PlaybackTypes.StepId
 export type PlayRequest<StepT = StepId> = DefTypes.PlayRequest<StepT>

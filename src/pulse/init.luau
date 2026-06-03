@@ -3,11 +3,9 @@
 --!native
 
 local Types = require(script.types)
-local Components = require(script.components)
-local Managers = require(script.managers)
-local Services = require(script.services)
-local PulseService = Services.pulseService
-local Builder = Components.builder
+local Builder = require(script.components.builder.shared.builder)
+local RuntimeManager = require(script.managers.runtimeManager.shared.runtimeManager)
+local Sequence = require(script.components.sequence.shared.sequence)
 
 export type Clock = Types.Clock
 export type Phase<PhaseT> = Types.Phase<PhaseT>
@@ -42,23 +40,21 @@ export type Sequence<StepT = StepId> = Types.Sequence<StepT>
 export type Builder<StepT = StepId> = Types.Builder<StepT>
 export type Playback<StepT = StepId> = Types.Playback<StepT>
 export type Runtime<PhaseT> = Types.Runtime<PhaseT>
-export type PulseService = Types.PulseService
 
 local Pulse = {}
 
 Pulse.types = Types
-Pulse.components = Components
-Pulse.managers = Managers
-Pulse.services = Services
 
 function Pulse.sequence<StepT>(definition: Definition<StepT>): Sequence<StepT>
-	return PulseService.sequence(definition)
+	return Sequence.compile(definition)
 end
 
-function Pulse.define<StepT>(): Builder<StepT>
+function Pulse.builder<StepT>(): Builder<StepT>
 	return Builder.new()
 end
 
-Pulse.runtime = PulseService.runtime
+Pulse.runtime = {
+	new = RuntimeManager.new,
+}
 
 return Pulse
