@@ -17,7 +17,6 @@ pesde install
 
 The package depends on:
 
-- `emdomanus/hook` for hook-style observer events.
 - `emdomanus/tempo` for clocks, phases, and scheduler integration.
 
 Initial package shape:
@@ -47,6 +46,11 @@ local handle = runtime:play(sequence, {
 		scale = 1,
 	},
 })
+
+local disconnect = handle:onEnded(function(completion)
+	print(completion.status, completion.reason)
+end)
+disconnect()
 ```
 
 `steps` are generic. VFX sequences can use names such as `"release"`, while
@@ -136,9 +140,9 @@ Seek policy is explicit:
 - `none` rejects `seek` and `setTimePosition` calls.
 
 Pulse isolates user callback errors. If an event, update, step, signal, or
-lifecycle hook throws, the playback transitions to `failed` and the error is
+lifecycle callback throws, the playback transitions to `failed` and the error is
 stored on the completion object instead of escaping through the runtime phase.
-Observer hook listener errors are caught and warned without changing playback
+Observer listener errors are caught and warned without changing playback
 state.
 
 Transitions are whitelist-based. Once any transition rule is present, only

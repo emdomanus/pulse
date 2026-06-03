@@ -11,25 +11,37 @@ export type Status = DefTypes.Status
 export type CompletionReason = DefTypes.CompletionReason
 export type Completion = DefTypes.Completion
 export type Params = DefTypes.Params
-export type Hook<T...> = DefTypes.Hook<T...>
 export type PlayRequest<StepT = StepId> = DefTypes.PlayRequest<StepT>
 export type SeekRequest<StepT = StepId> = DefTypes.SeekRequest<StepT>
 export type Context<StepT = StepId> = ContextTypes.Context<StepT>
 export type Sequence<StepT = StepId> = SequenceTypes.Sequence<StepT>
 type SequenceImpl<StepT = StepId> = SequenceTypes.SequenceImpl<StepT>
 
-export type Playback<StepT = StepId> = {
-	Ended: Hook<Completion>,
-	Looped: Hook<number>,
-	ParamChanged: Hook<string, any, any?>,
-	Signaled: Hook<string, any?>,
+export type CallbackMap<T...> = { [(T...) -> ()]: true }
+export type EndedCallback = (completion: Completion) -> ()
+export type LoopedCallback = (loopCount: number) -> ()
+export type ParamChangedCallback = (name: string, value: any, oldValue: any?) -> ()
+export type SignaledCallback = (name: string, payload: any?) -> ()
 
+export type PlaybackCallbacks = {
+	ended: CallbackMap<Completion>,
+	looped: CallbackMap<number>,
+	paramChanged: CallbackMap<string, any, any?>,
+	signaled: CallbackMap<string, any?>,
+}
+
+export type Playback<StepT = StepId> = {
 	play: (self: Playback<StepT>) -> Playback<StepT>,
 	pause: (self: Playback<StepT>) -> (),
 	resume: (self: Playback<StepT>) -> (),
 	stop: (self: Playback<StepT>, reason: CompletionReason?) -> (),
 	cancel: (self: Playback<StepT>, reason: CompletionReason?) -> (),
 	destroy: (self: Playback<StepT>) -> (),
+
+	onEnded: (self: Playback<StepT>, callback: EndedCallback) -> (() -> ()),
+	onLooped: (self: Playback<StepT>, callback: LoopedCallback) -> (() -> ()),
+	onParamChanged: (self: Playback<StepT>, callback: ParamChangedCallback) -> (() -> ()),
+	onSignaled: (self: Playback<StepT>, callback: SignaledCallback) -> (() -> ()),
 
 	isPlaying: (self: Playback<StepT>) -> boolean,
 	isPaused: (self: Playback<StepT>) -> boolean,
@@ -55,6 +67,7 @@ export type Playback<StepT = StepId> = {
 }
 
 export type PlaybackImpl<StepT = StepId> = Playback<StepT> & {
+	_callbacks: PlaybackCallbacks,
 	_sequence: SequenceImpl<StepT>,
 	_status: Status,
 	_step: StepT?,

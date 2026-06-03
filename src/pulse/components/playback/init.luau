@@ -2,7 +2,6 @@
 --!optimize 2
 --!native
 
-local HookModule = require(script.Parent.Parent.Parent.externalPackages.hook)
 local DefTypes = require(script.Parent.Parent.types.def)
 local ContextComponent = require(script.Parent.context)
 local PlaybackTypes = require(script.Parent.Parent.types.components.playback)
@@ -17,7 +16,7 @@ type PlaybackImpl<StepT = StepId> = PlaybackTypes.PlaybackImpl<StepT>
 local Playback = {}
 Playback.__index = Playback
 
-type Hook<T...> = HookModule.Hook<T...>
+type CallbackMap<T...> = PlaybackTypes.CallbackMap<T...>
 
 local MAX_LOOP_CATCH_UP = 16
 
@@ -75,11 +74,28 @@ local function runCleanup<StepT>(self: PlaybackImpl<StepT>): any?
 	return firstError
 end
 
-local function fireObserverHook<T...>(hook: Hook<T...>, ...: T...)
-	local ok, hookErr = pcall(hook.fire, hook, ...)
+local function bindCallback<T...>(callbacks: CallbackMap<T...>, callback: (T...) -> ()): (() -> ())
+	local connected = true
 
-	if not ok then
-		warn("[Pulse] observer hook listener failed:", hookErr)
+	callbacks[callback] = true
+
+	return function()
+		if not connected then
+			return
+		end
+
+		connected = false
+		callbacks[callback] = nil
+	end
+end
+
+local function fireCallbacks<T...>(callbacks: CallbackMap<T...>, ...: T...)
+	for callback in callbacks do
+		local ok, callbackErr = pcall(callback, ...)
+
+		if not ok then
+			warn("[Pulse] observer listener failed:", callbackErr)
+		end
 	end
 end
 
@@ -147,7 +163,7 @@ local function finish<StepT>(
 		self._status = "stopping"
 		self._completion = completion
 		self._cleanupRemaining = cleanupDelay
-		fireObserverHook(self.Ended, completion)
+		fireCallbacks(self._callbacks.ended, completion)
 		return
 	end
 
@@ -161,7 +177,7 @@ local function finish<StepT>(
 		completion.error = cleanupErr
 		self._status = "failed"
 	end
-	fireObserverHook(self.Ended, completion)
+	fireCallbacks(self._callbacks.ended, completion)
 end
 
 local function finishCleanupDelay<StepT>(self: PlaybackImpl<StepT>)
@@ -242,7 +258,7 @@ local function emitLoop<StepT>(self: PlaybackImpl<StepT>)
 		end
 	end
 
-	fireObserverHook(self.Looped, self._loopCount)
+	fireCallbacks(self._callbacks.looped, self._loopCount)
 end
 
 local function seekTo<StepT>(
@@ -309,10 +325,12 @@ function Playback.new<StepT>(
 	local timePosition = request.timePosition or 0
 
 	local self: PlaybackImpl<StepT> = setmetatable({
-		Ended = HookModule.new(),
-		Looped = HookModule.new(),
-		ParamChanged = HookModule.new(),
-		Signaled = HookModule.new(),
+		_callbacks = {
+			ended = {},
+			looped = {},
+			paramChanged = {},
+			signaled = {},
+		},
 		_sequence = sequence,
 		_status = "idle",
 		_step = nil,
@@ -398,10 +416,38 @@ function Playback.destroy<StepT>(self: PlaybackImpl<StepT>)
 	end
 
 	finish(self, "destroyed", "destroyed", nil, false)
-	self.Ended:clear()
-	self.Looped:clear()
-	self.ParamChanged:clear()
-	self.Signaled:clear()
+	table.clear(self._callbacks.ended)
+	table.clear(self._callbacks.looped)
+	table.clear(self._callbacks.paramChanged)
+	table.clear(self._callbacks.signaled)
+end
+
+function Playback.onEnded<StepT>(
+	self: PlaybackImpl<StepT>,
+	callback: PlaybackTypes.EndedCallback
+): (() -> ())
+	return bindCallback(self._callbacks.ended, callback)
+end
+
+function Playback.onLooped<StepT>(
+	self: PlaybackImpl<StepT>,
+	callback: PlaybackTypes.LoopedCallback
+): (() -> ())
+	return bindCallback(self._callbacks.looped, callback)
+end
+
+function Playback.onParamChanged<StepT>(
+	self: PlaybackImpl<StepT>,
+	callback: PlaybackTypes.ParamChangedCallback
+): (() -> ())
+	return bindCallback(self._callbacks.paramChanged, callback)
+end
+
+function Playback.onSignaled<StepT>(
+	self: PlaybackImpl<StepT>,
+	callback: PlaybackTypes.SignaledCallback
+): (() -> ())
+	return bindCallback(self._callbacks.signaled, callback)
 end
 
 function Playback.isPlaying<StepT>(self: PlaybackImpl<StepT>): boolean
@@ -435,7 +481,7 @@ function Playback.setParam<StepT>(self: PlaybackImpl<StepT>, name: string, value
 		end
 	end
 
-	fireObserverHook(self.ParamChanged, name, value, oldValue)
+	fireCallbacks(self._callbacks.paramChanged, name, value, oldValue)
 end
 
 function Playback.getParam<StepT>(self: PlaybackImpl<StepT>, name: string): any
@@ -456,7 +502,7 @@ function Playback.signal<StepT>(self: PlaybackImpl<StepT>, name: string, payload
 		end
 	end
 
-	fireObserverHook(self.Signaled, name, payload)
+	fireCallbacks(self._callbacks.signaled, name, payload)
 end
 
 function Playback.getStep<StepT>(self: PlaybackImpl<StepT>): StepT?

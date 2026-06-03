@@ -21,7 +21,7 @@ export type Runtime<PhaseT> = {
 export type RuntimeImpl<PhaseT> = Runtime<PhaseT> & {
 	_options: RuntimeOptions<PhaseT>,
 	_playbacks: { PlaybackImpl<any> },
-	_bindingId: number?,
+	_unbind: (() -> ())?,
 }
 
 return {}

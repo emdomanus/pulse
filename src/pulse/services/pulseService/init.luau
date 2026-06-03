@@ -17,7 +17,7 @@ function PulseService.sequence<StepT>(definition: Definition<StepT>): Sequence<S
 	return Sequence.compile(definition)
 end
 
-PulseService.Runtime = {
+PulseService.runtime = {
 	new = RuntimeManager.new,
 }
 

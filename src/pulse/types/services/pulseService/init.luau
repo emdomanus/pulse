@@ -14,7 +14,7 @@ export type Runtime<PhaseT> = RuntimeManagerTypes.Runtime<PhaseT>
 
 export type PulseService = {
 	sequence: <StepT>(definition: Definition<StepT>) -> Sequence<StepT>,
-	Runtime: {
+	runtime: {
 		new: <PhaseT>(options: RuntimeOptions<PhaseT>) -> Runtime<PhaseT>,
 	},
 }

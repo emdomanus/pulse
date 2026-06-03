@@ -353,8 +353,8 @@ local function playLoop()
 	})
 
 	setActive(playback :: any, "loop")
-	playback.Looped:add(function(loopCount)
-		log(`loop hook {loopCount}`)
+	playback:onLooped(function(loopCount)
+		log(`loop callback {loopCount}`)
 	end)
 end
 
@@ -368,7 +368,7 @@ local function playGated()
 	})
 
 	setActive(playback :: any, "gated")
-	playback.Ended:add(function(completion)
+	playback:onEnded(function(completion)
 		log(`gated ended {completion.status}/{completion.reason}`)
 	end)
 end
@@ -383,7 +383,7 @@ local function playCleanup()
 	})
 
 	setActive(playback :: any, "cleanup")
-	playback.Ended:add(function(completion)
+	playback:onEnded(function(completion)
 		log(`cleanup ended {completion.status}/{completion.reason}; atom should linger`)
 	end)
 end

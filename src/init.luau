@@ -8,7 +8,6 @@ export type Clock = Pulse.Clock
 export type Phase<PhaseT> = Pulse.Phase<PhaseT>
 export type PhaseName<PhaseT> = Pulse.PhaseName<PhaseT>
 export type Tempo<PhaseT> = Pulse.Tempo<PhaseT>
-export type Hook<T...> = Pulse.Hook<T...>
 
 export type Status = Pulse.Status
 export type CompletionReason = Pulse.CompletionReason
@@ -19,6 +18,12 @@ export type StepId = Pulse.StepId
 export type PlayRequest<StepT = StepId> = Pulse.PlayRequest<StepT>
 export type RuntimeOptions<PhaseT> = Pulse.RuntimeOptions<PhaseT>
 export type SeekRequest<StepT = StepId> = Pulse.SeekRequest<StepT>
+export type CallbackMap<T...> = Pulse.CallbackMap<T...>
+export type EndedCallback = Pulse.EndedCallback
+export type LoopedCallback = Pulse.LoopedCallback
+export type ParamChangedCallback = Pulse.ParamChangedCallback
+export type SignaledCallback = Pulse.SignaledCallback
+export type PlaybackCallbacks = Pulse.PlaybackCallbacks
 export type TransitionRule<StepT = StepId> = Pulse.TransitionRule<StepT>
 export type Context<StepT = StepId> = Pulse.Context<StepT>
 export type CallbackContext = Pulse.CallbackContext

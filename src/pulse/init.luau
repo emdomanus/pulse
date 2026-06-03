@@ -13,7 +13,6 @@ export type Clock = Types.Clock
 export type Phase<PhaseT> = Types.Phase<PhaseT>
 export type PhaseName<PhaseT> = Types.PhaseName<PhaseT>
 export type Tempo<PhaseT> = Types.Tempo<PhaseT>
-export type Hook<T...> = Types.Hook<T...>
 
 export type Status = Types.Status
 export type CompletionReason = Types.CompletionReason
@@ -24,6 +23,12 @@ export type StepId = Types.StepId
 export type PlayRequest<StepT = StepId> = Types.PlayRequest<StepT>
 export type RuntimeOptions<PhaseT> = Types.RuntimeOptions<PhaseT>
 export type SeekRequest<StepT = StepId> = Types.SeekRequest<StepT>
+export type CallbackMap<T...> = Types.CallbackMap<T...>
+export type EndedCallback = Types.EndedCallback
+export type LoopedCallback = Types.LoopedCallback
+export type ParamChangedCallback = Types.ParamChangedCallback
+export type SignaledCallback = Types.SignaledCallback
+export type PlaybackCallbacks = Types.PlaybackCallbacks
 export type TransitionRule<StepT = StepId> = Types.TransitionRule<StepT>
 export type Context<StepT = StepId> = Types.Context<StepT>
 export type CallbackContext = Types.CallbackContext
@@ -54,6 +59,6 @@ function Pulse.define<StepT>(): Builder<StepT>
 	return Builder.new()
 end
 
-Pulse.Runtime = PulseService.Runtime
+Pulse.runtime = PulseService.runtime
 
 return Pulse

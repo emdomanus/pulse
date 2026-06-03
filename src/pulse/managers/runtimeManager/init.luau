@@ -17,11 +17,11 @@ function RuntimeManager.new<PhaseT>(_options: RuntimeOptions<PhaseT>): Runtime<P
 	local self: RuntimeImpl<PhaseT> = setmetatable({
 		_options = options,
 		_playbacks = {},
-		_bindingId = nil,
+		_unbind = nil,
 	}, RuntimeManager) :: any
 
 	local phase = options.phase or options.tempo.phases.heartbeat
-	self._bindingId = options.tempo:bindPhase(phase, function(dt: number)
+	self._unbind = options.tempo:bindPhase(phase, function(dt: number)
 		for index = #self._playbacks, 1, -1 do
 			local playback = self._playbacks[index]
 			local playbackImpl = playback :: any
@@ -54,10 +54,10 @@ function RuntimeManager.play<PhaseT, StepT>(
 end
 
 function RuntimeManager.destroy<PhaseT>(self: RuntimeImpl<PhaseT>)
-	local bindingId = self._bindingId
-	if bindingId ~= nil then
-		self._options.tempo:unbindPhase(bindingId)
-		self._bindingId = nil
+	local unbind = self._unbind
+	if unbind ~= nil then
+		unbind()
+		self._unbind = nil
 	end
 
 	for _, playback in self._playbacks do

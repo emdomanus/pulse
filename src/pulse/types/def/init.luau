@@ -2,14 +2,12 @@
 --!optimize 2
 --!native
 
-local HookModule = require(script.Parent.Parent.Parent.externalPackages.hook)
 local TempoModule = require(script.Parent.Parent.Parent.externalPackages.tempo)
 
 export type Clock = TempoModule.Clock
 export type Phase<PhaseT> = TempoModule.Phase<PhaseT>
 export type PhaseName<PhaseT> = TempoModule.PhaseName<PhaseT>
 export type Tempo<PhaseT> = TempoModule.Tempo<PhaseT>
-export type Hook<T...> = HookModule.Hook<T...>
 
 export type Status =
 	"idle"

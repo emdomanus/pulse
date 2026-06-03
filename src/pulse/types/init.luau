@@ -14,7 +14,6 @@ export type Clock = DefTypes.Clock
 export type Phase<PhaseT> = DefTypes.Phase<PhaseT>
 export type PhaseName<PhaseT> = DefTypes.PhaseName<PhaseT>
 export type Tempo<PhaseT> = DefTypes.Tempo<PhaseT>
-export type Hook<T...> = DefTypes.Hook<T...>
 
 export type Status = DefTypes.Status
 export type CompletionReason = DefTypes.CompletionReason
@@ -25,6 +24,12 @@ export type StepId = DefTypes.StepId
 export type PlayRequest<StepT = StepId> = DefTypes.PlayRequest<StepT>
 export type RuntimeOptions<PhaseT> = DefTypes.RuntimeOptions<PhaseT>
 export type SeekRequest<StepT = StepId> = DefTypes.SeekRequest<StepT>
+export type CallbackMap<T...> = PlaybackTypes.CallbackMap<T...>
+export type EndedCallback = PlaybackTypes.EndedCallback
+export type LoopedCallback = PlaybackTypes.LoopedCallback
+export type ParamChangedCallback = PlaybackTypes.ParamChangedCallback
+export type SignaledCallback = PlaybackTypes.SignaledCallback
+export type PlaybackCallbacks = PlaybackTypes.PlaybackCallbacks
 
 export type Context<StepT = StepId> = ContextTypes.Context<StepT>
 export type CallbackContext = SequenceTypes.CallbackContext
