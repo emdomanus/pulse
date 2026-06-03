@@ -1,0 +1,10 @@
+{
+  "files.associations": {
+    "*.luau": "luau"
+  },
+  "Lua.diagnostics.enable": false,
+  "Lua.workspace.checkThirdParty": false,
+  "luau-lsp.sourcemap.enabled": true,
+  "luau-lsp.sourcemap.rojoProjectFile": "dev.project.json",
+  "luau-lsp.sourcemap.sourcemapFile": "dev-sourcemap.json"
+}

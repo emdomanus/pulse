@@ -23,7 +23,7 @@ local tempo = Tempo.new({
 
 RunService.Heartbeat:Connect(tempo:evaluatePhase(tempo.phases.heartbeat))
 
-local runtime = Pulse.Runtime.new({
+local runtime = Pulse.runtime.new({
 	tempo = tempo,
 	phase = tempo.phases.heartbeat,
 })
