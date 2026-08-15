@@ -6,41 +6,41 @@ export type TestCase = {
 	run: TestCallback,
 }
 
-local Harness = {}
+local TestHarness = {}
 local tests: { TestCase } = {}
 
-function Harness.test(name: string, callback: TestCallback)
+function TestHarness.test(name: string, callback: TestCallback)
 	table.insert(tests, {
 		name = name,
 		run = callback,
 	})
 end
 
-function Harness.assertTrue(value: boolean, message: string?)
+function TestHarness.assertTrue(value: boolean, message: string?)
 	assert(value, message or "expected true")
 end
 
-function Harness.assertFalse(value: boolean, message: string?)
+function TestHarness.assertFalse(value: boolean, message: string?)
 	assert(not value, message or "expected false")
 end
 
-function Harness.assertEqual<T>(actual: T, expected: T, message: string?)
+function TestHarness.assertEqual<T>(actual: T, expected: T, message: string?)
 	assert(actual == expected, message or `expected {tostring(expected)}, got {tostring(actual)}`)
 end
 
-function Harness.assertNear(actual: number, expected: number, epsilon: number?)
+function TestHarness.assertNear(actual: number, expected: number, epsilon: number?)
 	local tolerance = epsilon or 1e-9
 	assert(math.abs(actual - expected) <= tolerance, `expected {expected}, got {actual}`)
 end
 
-function Harness.assertArrayEqual<T>(actual: { T }, expected: { T })
-	Harness.assertEqual(#actual, #expected, "array lengths differ")
+function TestHarness.assertArrayEqual<T>(actual: { T }, expected: { T })
+	TestHarness.assertEqual(#actual, #expected, "array lengths differ")
 	for index, expectedValue in expected do
-		Harness.assertEqual(actual[index], expectedValue, `arrays differ at index {index}`)
+		TestHarness.assertEqual(actual[index], expectedValue, `arrays differ at index {index}`)
 	end
 end
 
-function Harness.assertThrows(callback: TestCallback, pattern: string?)
+function TestHarness.assertThrows(callback: TestCallback, pattern: string?)
 	local ok, result = pcall(function(): unknown
 		callback()
 		return nil
@@ -54,9 +54,10 @@ function Harness.assertThrows(callback: TestCallback, pattern: string?)
 	end
 end
 
-function Harness.run()
+function TestHarness.run()
 	local passed = 0
 	local failed = 0
+
 	for _, testCase in tests do
 		local ok, result = pcall(function(): unknown
 			testCase.run()
@@ -71,10 +72,11 @@ function Harness.run()
 			print(result)
 		end
 	end
+
 	if failed > 0 then
 		error(`Pulse specs failed: {failed} failed`, 0)
 	end
 	print(`Pulse specs: {passed} passed, {failed} failed`)
 end
 
-return Harness
+return TestHarness
