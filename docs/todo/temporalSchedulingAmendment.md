@@ -1,9 +1,10 @@
 # Pulse Temporal Scheduling Amendment
 
-**Status:** Approved as the execution contract on 2026-08-15. No source
-implementation has started. Continuous reverse playback and correctness-first
-timed-step history retention are accepted for v1; the earlier forward-only
-recommendation is withdrawn.
+**Status:** Approved as the execution contract on 2026-08-15 and accelerated
+before implementation. Intermediate migration commits may be broken;
+compatibility and full verification are required only at the final milestone.
+Continuous reverse playback and correctness-first timed-step history retention
+remain accepted for v1.
 
 **Reviewed 2026-08-12 against:** Pulse `1914abf0` (`0.3.0`), Tempo
 `7452b56c` (`0.4.0`), and VoxelMMO TemporalService at the current ServiceDev
@@ -81,8 +82,9 @@ does not receive a TemporalService, a TempoRuntime, or a VoxelMMO phase name.
   old seek methods are deleted rather than shadowed by compatibility methods.
 
 The decisions at the end of this document are closed by operator approval. This
-file is the stable execution contract for CP-P0 through CP-P7; changes to these
-rulings require an explicit design amendment rather than worker inference.
+file is the stable execution contract for accelerated milestones M0 through M3;
+changes to these rulings require an explicit design amendment rather than
+worker inference.
 
 ## Current contract and fact base
 
@@ -214,12 +216,11 @@ Tempo-owned types. The new Pulse clock type is structural.
 Delete or change every tracked dependency point below in the same breaking
 migration:
 
-Do not remove Tempo during this design checkpoint or CP-P0: the currently
-exported Pulse runtime still imports the 0.2 adapter, so early manifest/lock
-removal would leave the checked-out package broken. CP-P6 performs the atomic
-source/export cutover, removes the production dependency, adds current Tempo to
+**KEEP TEMPO through M0, M1, and M2.** The currently exported Pulse runtime and
+development laboratory still import the 0.2 adapter. M3 removes the production
+dependency after replacement source no longer imports it, adds current Tempo to
 the supported development-only conformance environment, and regenerates the
-lock. No Pesde install is required before CP-P0.
+lock. No Pesde install is required before M0.
 
 1. `pesde.toml`
    - remove `[dependencies].tempo = emdomanus/tempo ^0.2.0`;
@@ -669,7 +670,7 @@ closures perform all typed clock scheduling. This is the concrete existential
 erasure boundary. A strict fixture must create heterogeneous StepT, PhaseT, and
 DirectionT playbacks in one Runtime and prove there is no broad `any` in
 Runtime, ClockState, PhaseGroup, or owner-link types. If Luau cannot type this
-closure boundary without `any`, CP-P1 stops for contract review rather than
+closure boundary without `any`, M0 stops for contract review rather than
 hiding a cast.
 
 `playbackSpeed` must be finite and may be positive, zero, or negative. Zero
@@ -1237,7 +1238,7 @@ becomes inward or outward; becoming outward completes immediately.
 
 An internal catch-up work limit fails with a stable Pulse error rather than
 silently skipping work in either direction. Its value is chosen after the fake
-clock benchmark in CP-P0 and traversal profiling in CP-P2; this plan does not freeze
+clock benchmark in M0 and traversal profiling in M1; this plan does not freeze
 `10_000`. Whatever value is selected must be tested immediately below, at, and
 above the boundary and documented. Cooperative continuation is deferred.
 
@@ -1324,7 +1325,8 @@ This is a breaking package migration; do not maintain a dual old/new runtime.
    - replace Aftman with `rokit.toml` rather than adding a second manager;
    - add guarded verification scripts and a root `tests/lune/` harness;
    - add a deterministic fake scheduling clock and fake real-time scheduler;
-   - land only passing characterization tests for contracts that remain.
+   - add focused characterization coverage useful to the replacement; do not
+     preserve obsolete behavior merely to keep an intermediate commit green.
 3. **Canonical Pulse types**
    - add the structural clock, runtime, completion, address, and timer types in
      `types/`;
@@ -1370,175 +1372,99 @@ This is a breaking package migration; do not maintain a dual old/new runtime.
     - run all package gates and the Studio matrix;
     - do not publish Pulse.
 
-## Staged checkpoints and commit boundaries
+## Accelerated milestones and commit boundaries
 
 ### Preflight design checkpoint — approved contract
 
-Commit this TODO alone before implementation. The commit must not stage the
-pre-existing `dev/client/init.client.luau` whitespace. That design commit is the
-worker reference for every later checkpoint; it changes no runtime source,
-manifest, lock, generated state, Tempo source, or VoxelMMO source.
+The approved design TODO was committed alone at `9b59352`; the unrelated
+`dev/client/init.client.luau` whitespace remains outside every amendment commit.
 
-Each checkpoint ends with a reviewable commit whose scoped tests pass. The new
-implementation remains internal and the old root surface remains authoritative
-through CP-P5; CP-P6 performs the single atomic public cutover. This keeps every
-intermediate checkout testable without temporarily advertising an incomplete
-signed API. No checkpoint may include the pre-existing dev-client whitespace.
+Intermediate milestone commits are recovery points, not compatibility or
+release gates. They may fail builds, analysis, or tests while old code is being
+replaced. Do not build a parallel legacy/new surface merely to keep a midpoint
+green. Run focused checks when they accelerate debugging, but the complete
+verification matrix is mandatory only in M3. Use one implementation worker
+across milestones when possible and pause only for a genuine contract blocker.
 
-### CP-P0 — Test, tool, and profiling foundation
+### M0 — Foundation, contract, and compiler
 
-Scope: Rokit/tool configuration, guarded scripts, fake direction-aware clock,
-fake real-time scheduler, Lune harness, surviving behavior characterization,
-and a benchmark for synchronous catch-up work.
+Combined former scope: CP-P0 + CP-P1.
 
-Acceptance:
+- establish one tool manager, guarded verification scripts, a Lune harness,
+  deterministic direction-aware fake clock, fake real-time scheduler, and a
+  synchronous catch-up benchmark;
+- replace the public type contract directly; do not create an unexported
+  next-contract duplicate solely for migration compatibility;
+- implement builder/compiler changes, stable event identities, signed address
+  records, reverse actions, validation, and immutable/narrow compiled data;
+- add strict type fixtures and focused compiler/fake-clock tests sufficient to
+  support M1 debugging; the repository need not be globally green;
+- **KEEP TEMPO** in production dependencies and preserve the current adapter/dev
+  laboratory until M3.
 
-- one tool manager only;
-- guarded test/format/lint/analyze commands produce usable results;
-- the fake proves `bindToReached`, actual crossing direction, automatic
-  deadline retiming, cancellation, in-callback `rescheduleAt`, explicit phases,
-  change publication, clock destruction, and phase-binding counts;
-- benchmark data is recorded but does not silently choose a safety limit;
-- production source/API behavior is unchanged.
+**Recovery commit 1:** `refactor(sequence): establish temporal contract foundation`.
 
-**Commit boundary 1:** `test(tooling): establish deterministic temporal gates`.
+### M1 — Bidirectional borrowed-clock runtime
 
-### CP-P1 — Canonical contract and immutable compiler
+Combined former scope: CP-P2 + CP-P3.
 
-Scope: unexported next-contract type modules, builder/compiler implementation,
-stable event identities, signed address records, reverse actions, validations,
-and immutable/narrow compiled data. Root exports do not switch yet.
+- replace accumulated-frame advancement with the central signed reconciliation
+  engine, boundary-side cursors, signed loop indices, event transactions,
+  timed-step history, catch-up, and queued callback mutation;
+- implement nongeneric Runtime ownership views, two-stage create/play,
+  ClockState/PhaseGroup records, signed anchors, direction-aware reached
+  scheduling, pause/resume/speed changes, and lazy shared continuous execution;
+- delete superseded playback/manager paths as their replacements land instead
+  of maintaining compatibility adapters;
+- use focused bidirectional traversal and fake-clock tests while debugging, but
+  do not spend time restoring unrelated intermediate package behavior;
+- **KEEP TEMPO** through this milestone.
 
-Acceptance:
+**Recovery commit 2:** `feat(runtime): add bidirectional borrowed-clock playback`.
 
-- strict fixtures cover every proposed public type without broad `any`;
-- compiler tests prove stable forward/reverse equal-time order, loop validation,
-  reverse-action defaults, rebuild requirements, and immutable compiled data;
-- removed names are not copied into the next-contract modules as aliases;
-- the currently exported package still passes its characterization suite.
+### M2 — Addressing, rebuild, and lifecycle completion
 
-**Commit boundary 2:** `refactor(sequence): compile bidirectional timeline contracts`.
+Combined former scope: CP-P4 + CP-P5.
 
-### CP-P2 — Bidirectional traversal engine
+- implement `AddressPolicy`, loop-aware addresses/positions, manual seek,
+  delivered-delta discontinuity mapping, canonical forward rebuild, cleanup
+  generations, and timed-step history provenance;
+- implement the real-time cleanup scheduler, immediate immutable logical
+  completion, private post-completion retention, late observers, and every
+  terminal/teardown path;
+- finish removal of superseded runtime behavior, accepting a broken midpoint
+  rather than adding aliases or temporary semantic shims;
+- run focused address/lifecycle tests only as needed to debug M2;
+- **KEEP TEMPO** through this milestone.
 
-Scope: internal central reconciliation, boundary-side cursors, signed loop
-indices, forward/reverse event transactions, step occurrence journal, loop
-ordering, terminal selection, catch-up, and queued callback mutation. No clock
-group or public cutover belongs in this checkpoint.
+**Recovery commit 3:** `feat(playback): complete addressing and lifecycle semantics`.
 
-Acceptance:
+### M3 — Dependency cutover, hardening, documentation, and final proof
 
-- pure deterministic traversal tests pass in both directions, including zero
-  and duration events, repeated exact-boundary sign pivots, blocked gates,
-  missing reverse/history cancellation, irreversible `ignore`, step restore,
-  outward terminal starts, and multi-loop catch-up;
-- nonterminal callback mutation never duplicates or half-applies an occurrence;
-- catch-up overrun fails explicitly at a test-injected limit;
-- no rebuild is used as a substitute for continuous reverse.
+Combined former scope: CP-P6 + CP-P7.
 
-**Commit boundary 3:** `feat(playback): add deterministic reverse traversal`.
+- confirm replacement source has no production Tempo import, then remove Tempo
+  0.2 from production dependencies, delete the adapter, add current Tempo only
+  to the supported development conformance environment, and regenerate Pulse's
+  lock through Pesde;
+- complete public exports, strict analyzer proof, current Tempo structural and
+  runtime conformance, stale-name deletion, and the full reentrancy/race matrix;
+- run every behavioral test in both directions where applicable, all package
+  format/lint/analyze gates, documentation verification/build when supported,
+  and the complete Studio operator matrix;
+- update README/package docs and the Studio laboratory, including reached/group
+  counts and current/peak timed-step history visibility;
+- finish with one green, reusable standalone Pulse package. Do not publish and
+  do not perform VMMO Pesde operations or edit Tempo/VMMO source.
 
-### CP-P3 — Borrowed-clock deadlines, anchors, and phase groups
+**Final commit 4:** `feat(pulse): complete temporal scheduling amendment`.
 
-Scope: nongeneric Runtime ownership views, two-stage create/play, ClockState and
-PhaseGroup records, signed anchors, direction-aware reached scheduling,
-pause/resume/speed handling, and lazy shared continuous execution. Addressing is
-limited to cold start during this internal checkpoint.
-
-Acceptance:
-
-- event-only sequences use at most one reached id and no phase callback;
-- N updating playbacks on one clock/phase produce exactly one binding and
-  release it at zero; distinct clock/phase identities do not share;
-- clock-rate and local-speed sign changes preserve position and reschedule in
-  the correct clock and sequence directions;
-- current Tempo `bindToReached`/running `rescheduleAt` behavior is represented
-  by the fake; no per-playback or per-runtime always-on loop remains;
-- one nongeneric Runtime safely owns heterogeneous generic playback fixtures.
-
-**Commit boundary 4:** `feat(runtime): schedule Pulse through borrowed clocks`.
-
-### CP-P4 — Addressing, rebuild, and cleanup generations
-
-Scope: `AddressPolicy`, loop-aware `SequenceAddress`/`PlaybackPosition`, manual
-seek, delivered-delta discontinuity mapping, canonical forward rebuild,
-generation-scoped cleanup, and history provenance after initial/skip/rebuild.
-
-Acceptance:
-
-- cancel/skip/rebuild matrices pass for forward, backward, stationary, looped,
-  and exact-boundary targets;
-- the discontinuity target uses delivered previous/current clock positions and
-  signed local speed, never a clock position as a sequence position;
-- rebuild flushes the old generation before reset/replay and never cleans an
-  already-reset resource later;
-- looped rebuild diagnostics expose both loop indices and unwrapped positions;
-- reverse timed-step traversal after missing skip/initial history cancels before
-  user code; step-less authored reverse remains valid.
-
-**Commit boundary 5:** `feat(playback): add explicit addressing and rebuild ownership`.
-
-### CP-P5 — Logical completion and private disposal
-
-Scope: real-time cleanup scheduler, immediate immutable completion, private
-post-completion retention, late observers, and every stop/cancel/failure/
-destroy/runtime-destroy path. The implementation is still internal.
-
-Acceptance:
-
-- `Ended` fires once at logical termination before positive-delay disposal;
-- terminal status and Completion never change during retention or cleanup
-  failure;
-- Runtime destruction flushes retained cleanup without changing `completed`;
-- no public `stopping`, `Disposed`, or `onDisposed` surface exists;
-- cleanup timing and registration tests pass against fake real time.
-
-**Commit boundary 6:** `feat(lifecycle): separate logical end from disposal`.
-
-### CP-P6 — Race hardening, conformance, and atomic cutover
-
-Scope: full reentrancy/race matrix, strict analyzer proof, current Tempo runtime
-conformance fixture, public root/export switch, old manager/adapter deletion,
-manifest/lock migration, and stale-name search.
-
-Acceptance:
-
-- every behavioral/race test below passes in both effective sequence
-  directions where applicable;
-- observer dispatch, stale task ids, clock change immediately before reached
-  execution, in-callback rescheduling, and teardown races are deterministic;
-- production source and public types contain no Tempo import or old seek/runtime
-  aliases; current Tempo exists only in the supported dev/test environment;
-- the old Tempo 0.2.0 production lock entry is gone, while a current dev-only
-  Tempo entry is allowed and expected for conformance;
-- the profiled catch-up limit is named, documented, and tested below/at/above;
-- ignored/generated state and unrelated dev-client whitespace are not staged.
-
-**Commit boundary 7:** `refactor(runtime): cut over to structural clock ownership`.
-
-### CP-P7 — Documentation and Studio laboratory
-
-Scope: README, package docs/navigation, verification docs, and dev client.
-
-Acceptance:
-
-- docs build passes if documentation tooling has been added;
-- Studio shows reached-task/group-binding counts and both clock/sequence
-  directions for event-only and updating scenarios, plus the current and peak
-  timed-step reverse-history count per playback;
-- forward/reverse progression, exact-boundary sign pivots, reported jumps,
-  pause/resume, cleanup retention, and cancellation are operator-verified;
-- the dev client's pre-existing whitespace change is preserved and called out
-  separately in the diff;
-- VMMO and Tempo remain unmodified.
-
-**Commit boundary 8:** `docs(dev): document and exercise borrowed-clock playback`.
-
-Review pause after every commit boundary. CP-P0 through CP-P5 are deliberately
-non-publishable implementation-branch states; CP-P6 is the first complete new
-public package. Issue one bounded worker prompt per checkpoint and do not start
-the next checkpoint until the prior commit has been reviewed. Do not publish or
-begin VMMO package operations.
+Issue one bounded worker prompt per accelerated milestone. Prefer the same
+worker for M1 through M3 to retain implementation context. Do not pause between
+milestones for ordinary review; pause only for a genuine contract blocker,
+unrecoverable tool failure, unexpected user-owned overlap, or required external
+Pesde action. The unrelated dev-client whitespace must remain preserved and
+separately visible throughout.
 
 ## Behavioral and race-condition test matrix
 
@@ -1846,11 +1772,12 @@ to bind independently.
    composition to pass canonical phase tokens. Pulse does not own a phase
    registry.
 8. **Catch-up safety value.** Accepted: failure instead of silent loss.
-   CP-P0 profiling selects and documents the finite per-reconcile value; no
+   M0 profiling selects and documents the finite per-reconcile value; no
    unprofiled `10_000` constant is part of this contract, so the number itself
    is not a pre-implementation blocker.
 
 The contract is technically implementable as written; no unresolved algorithmic
-or approval blocker remains. After the standalone design commit, work may begin
-at CP-P0 and must pause at every commit boundary. Tempo and VoxelMMO remain
-unmodified throughout unless a separate request explicitly broadens scope.
+or approval blocker remains. After the accelerated design commit, work may begin
+at M0 and continue through M3 without operator pauses unless a real contract
+blocker appears. Tempo and VoxelMMO source remain unmodified unless a separate
+request explicitly broadens scope.
