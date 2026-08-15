@@ -4,4 +4,5 @@ roblox_packages/
 *-sourcemap.json
 sourcemap.json
 *.tar.gz
-
+scripts/luau-lsp/globalTypes.d.luau
+tests/lune/.tmp/

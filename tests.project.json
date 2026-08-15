@@ -1,0 +1,15 @@
+{
+  "name": "pulse-tests",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "pulse": {
+        "$path": "src"
+      },
+      "typeTests": {
+        "$path": "tests/type"
+      }
+    }
+  }
+}
