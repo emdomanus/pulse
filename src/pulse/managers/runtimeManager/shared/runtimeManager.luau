@@ -3,18 +3,20 @@
 --!native
 
 local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
+local OwnershipTypes = require(script.Parent.Parent.Parent.Parent.types.internal.ownership)
 local RuntimeTypes = require(script.Parent.Parent.Parent.Parent.types.managers.runtimeManager)
+local RuntimeInternalTypes = require(script.Parent.Parent.Parent.Parent.types.managers.runtimeManager.internal)
 local Playback = require(script.Parent.Parent.Parent.Parent.components.playback.shared.playback)
+local ClockState = require(script.Parent.clockState)
+local PhaseGroup = require(script.Parent.phaseGroup)
 
 type Runtime = RuntimeTypes.Runtime
 type RuntimeConfig = RuntimeTypes.RuntimeConfig
-type RuntimeImpl = RuntimeTypes.RuntimeImpl
-type PlaybackOwned = RuntimeTypes.PlaybackOwned
-type PlaybackRuntimeLink = RuntimeTypes.PlaybackRuntimeLink
-type ClockStatePort = RuntimeTypes.ClockStatePort
-type PhaseGroupPort = RuntimeTypes.PhaseGroupPort
-type ClockStateOwned = RuntimeTypes.ClockStateOwned
-type PhaseGroupOwned = RuntimeTypes.PhaseGroupOwned
+type RuntimeImpl = RuntimeInternalTypes.RuntimeImpl
+type RuntimeOwner = OwnershipTypes.RuntimeOwner
+type PlaybackOwned = RuntimeInternalTypes.PlaybackOwned
+type ClockStateOwned = RuntimeInternalTypes.ClockStateOwned
+type PhaseGroupOwned = RuntimeInternalTypes.PhaseGroupOwned
 type PlaybackOptions<StepT, PhaseT, DirectionT> = RuntimeTypes.PlaybackOptions<StepT, PhaseT, DirectionT>
 type Sequence<StepT> = RuntimeTypes.Sequence<StepT>
 type PublicPlayback<StepT> = RuntimeTypes.Playback<StepT>
@@ -44,203 +46,19 @@ local function removeValue<T>(values: { T }, candidate: T): boolean
 	return true
 end
 
-local function findClockState(self: RuntimeImpl, clockCandidate: unknown): (ClockStateOwned?, number?)
-	for index, state in self._clockStates do
-		if state.port.sameClock(clockCandidate) then
-			return state, index
-		end
-	end
-	return nil, nil
-end
-
-local function findPhaseGroup(state: ClockStateOwned, phaseCandidate: unknown): (PhaseGroupOwned?, number?)
-	for index, group in state.groups do
-		if group.port.samePhase(phaseCandidate) then
-			return group, index
-		end
-	end
-	return nil, nil
-end
-
-local function releaseContinuous(group: PhaseGroupOwned)
-	local release = group.releaseContinuous
-	if release ~= nil then
-		group.releaseContinuous = nil
-		release()
-	end
-end
-
-local function removeUpdatingMember(group: PhaseGroupOwned, playback: PlaybackOwned)
-	if removeValue(group.updatingMembers, playback) and #group.updatingMembers == 0 then
-		releaseContinuous(group)
-	end
-end
-
-local function bindContinuous(group: PhaseGroupOwned)
-	if group.releaseContinuous ~= nil or #group.updatingMembers == 0 then
-		return
-	end
-
-	group.releaseContinuous = group.port.bind(function(_clockDt: number, now: number)
-		local snapshot = table.clone(group.updatingMembers)
-		for _, playback in snapshot do
-			if findValue(group.updatingMembers, playback) ~= nil then
-				playback.runContinuous(now)
-			end
-		end
-	end)
-end
-
-local function locatePlaybackGroup(self: RuntimeImpl, playback: PlaybackOwned): (ClockStateOwned?, PhaseGroupOwned?)
+local function findClockState(self: RuntimeImpl, clockCandidate: unknown): ClockStateOwned?
 	for _, state in self._clockStates do
-		if findValue(state.playbacks, playback) ~= nil then
-			for _, group in state.groups do
-				if findValue(group.members, playback) ~= nil then
-					return state, group
-				end
-			end
+		if state:_sameClock(clockCandidate) then
+			return state
 		end
 	end
-	return nil, nil
+	return nil
 end
 
-local function detachPlayback(self: RuntimeImpl, playback: PlaybackOwned)
-	removeValue(self._playbacks, playback)
-
-	local state, group = locatePlaybackGroup(self, playback)
-	if state == nil or group == nil then
-		return
+local function removeClockState(self: RuntimeImpl, state: ClockStateOwned)
+	if removeValue(self._clockStates, state) then
+		state:_destroy()
 	end
-
-	removeUpdatingMember(group, playback)
-	removeValue(group.members, playback)
-	removeValue(state.playbacks, playback)
-
-	if #group.members == 0 then
-		releaseContinuous(group)
-		for index, candidate in state.groups do
-			if candidate == group then
-				table.remove(state.groups, index)
-				break
-			end
-		end
-	end
-
-	if #state.playbacks == 0 then
-		local release = state.releaseChanged
-		state.releaseChanged = nil
-		if release ~= nil then
-			release()
-		end
-		for _, remainingGroup in state.groups do
-			releaseContinuous(remainingGroup)
-		end
-		table.clear(state.groups)
-		for index, candidate in self._clockStates do
-			if candidate == state then
-				table.remove(self._clockStates, index)
-				break
-			end
-		end
-	end
-end
-
-local function activatePlayback(
-	self: RuntimeImpl,
-	playback: PlaybackOwned,
-	clockPort: ClockStatePort,
-	phasePort: PhaseGroupPort,
-	clockCandidate: unknown,
-	phaseCandidate: unknown
-): boolean
-	if self._destroyed or clockPort.isDestroyed() then
-		return false
-	end
-
-	local foundState = findClockState(self, clockCandidate)
-	local state: ClockStateOwned
-	if foundState == nil then
-		local createdState: ClockStateOwned = {
-			port = clockPort,
-			playbacks = {},
-			groups = {},
-			releaseChanged = nil,
-		}
-		state = createdState
-		table.insert(self._clockStates, state)
-		state.releaseChanged = clockPort.bindChanged(function(change)
-			local snapshot = table.clone(state.playbacks)
-			for _, member in snapshot do
-				if findValue(state.playbacks, member) ~= nil then
-					member.reconcileClockChange(change)
-				end
-			end
-		end, function(err)
-			local snapshot = table.clone(state.playbacks)
-			for _, member in snapshot do
-				if findValue(state.playbacks, member) ~= nil then
-					member.terminate("failed", "invalidClockChange", err)
-				end
-			end
-		end)
-	else
-		state = foundState
-	end
-
-	if findValue(state.playbacks, playback) == nil then
-		table.insert(state.playbacks, playback)
-	end
-
-	local foundGroup = findPhaseGroup(state, phaseCandidate)
-	local group: PhaseGroupOwned
-	if foundGroup == nil then
-		local createdGroup: PhaseGroupOwned = {
-			port = phasePort,
-			members = {},
-			updatingMembers = {},
-			releaseContinuous = nil,
-		}
-		group = createdGroup
-		table.insert(state.groups, group)
-	else
-		group = foundGroup
-	end
-	if findValue(group.members, playback) == nil then
-		table.insert(group.members, playback)
-	end
-	return true
-end
-
-local function makeRuntimeLink(self: RuntimeImpl): PlaybackRuntimeLink
-	return {
-		register = function(playback)
-			assert(not self._destroyed, "Pulse Runtime is destroyed")
-			table.insert(self._playbacks, playback)
-		end,
-		activate = function(playback, clock, phase, clockCandidate, phaseCandidate)
-			return activatePlayback(self, playback, clock, phase, clockCandidate, phaseCandidate)
-		end,
-		setUpdating = function(playback, updating)
-			local _, group = locatePlaybackGroup(self, playback)
-			if group == nil then
-				return
-			end
-			if updating then
-				if findValue(group.updatingMembers, playback) == nil then
-					table.insert(group.updatingMembers, playback)
-				end
-				bindContinuous(group)
-			else
-				removeUpdatingMember(group, playback)
-			end
-		end,
-		detach = function(playback)
-			detachPlayback(self, playback)
-		end,
-		isDestroyed = function(): boolean
-			return self._destroyed
-		end,
-	}
 end
 
 function RuntimeManager.new(config: RuntimeConfig?): Runtime
@@ -260,6 +78,81 @@ function RuntimeManager.new(config: RuntimeConfig?): Runtime
 	return self
 end
 
+function RuntimeManager._registerPlayback(self: RuntimeImpl, playback: PlaybackOwned)
+	assert(not self._destroyed, "Pulse Runtime is destroyed")
+	table.insert(self._playbacks, playback)
+end
+
+function RuntimeManager._activatePlayback<PhaseT, DirectionT>(
+	self: RuntimeImpl,
+	playback: PlaybackOwned,
+	clock: DefTypes.Clock<PhaseT, DirectionT>
+): boolean
+	if self._destroyed or clock:isDestroyed() then
+		return false
+	end
+
+	local foundState = findClockState(self, clock)
+	local state: ClockStateOwned
+	if foundState == nil then
+		state = ClockState.new(clock)
+		table.insert(self._clockStates, state)
+	else
+		state = foundState
+	end
+	state:_addPlayback(playback)
+	return true
+end
+
+function RuntimeManager._setPlaybackUpdating<PhaseT, DirectionT>(
+	self: RuntimeImpl,
+	playback: PlaybackOwned,
+	updating: boolean,
+	clock: DefTypes.Clock<PhaseT, DirectionT>,
+	phase: PhaseT
+)
+	local state = findClockState(self, clock)
+	if state == nil or not state:_hasPlayback(playback) then
+		return
+	end
+
+	local foundGroup = state:_findPhaseGroup(phase)
+	if updating then
+		local group: PhaseGroupOwned
+		if foundGroup == nil then
+			group = PhaseGroup.new(clock, phase)
+			state:_addPhaseGroup(group)
+		else
+			group = foundGroup
+		end
+		group:_addPlayback(playback)
+	elseif foundGroup ~= nil then
+		foundGroup:_removePlayback(playback)
+		if foundGroup:_isEmpty() then
+			foundGroup:_destroy()
+			state:_removePhaseGroup(foundGroup)
+		end
+	end
+end
+
+function RuntimeManager._detachPlayback(self: RuntimeImpl, playback: PlaybackOwned)
+	removeValue(self._playbacks, playback)
+	for _, state in self._clockStates do
+		if state:_hasPlayback(playback) then
+			state:_removeFromPhaseGroups(playback)
+			state:_removePlayback(playback)
+			if state:_isEmpty() then
+				removeClockState(self, state)
+			end
+			return
+		end
+	end
+end
+
+function RuntimeManager._isDestroyed(self: RuntimeImpl): boolean
+	return self._destroyed
+end
+
 function RuntimeManager.createPlayback<StepT, PhaseT, DirectionT>(
 	self: RuntimeImpl,
 	sequence: Sequence<StepT>,
@@ -275,7 +168,7 @@ function RuntimeManager.createPlayback<StepT, PhaseT, DirectionT>(
 	assert(not clock:isDestroyed(), "Pulse cannot borrow a destroyed clock")
 	DefTypes.assertClockSample(clock:read())
 
-	return Playback.new(sequence, options, makeRuntimeLink(self))
+	return Playback.new(sequence, options, (self :: unknown) :: RuntimeOwner)
 end
 
 function RuntimeManager.destroy(self: RuntimeImpl)
@@ -286,19 +179,12 @@ function RuntimeManager.destroy(self: RuntimeImpl)
 
 	local snapshot = table.clone(self._playbacks)
 	for _, playback in snapshot do
-		playback.terminate("destroyed", "runtimeDestroyed", nil)
-		playback.dispose()
+		playback:_terminate("destroyed", "runtimeDestroyed", nil)
+		playback:_dispose()
 	end
 
 	for _, state in self._clockStates do
-		for _, group in state.groups do
-			releaseContinuous(group)
-		end
-		local release = state.releaseChanged
-		state.releaseChanged = nil
-		if release ~= nil then
-			release()
-		end
+		state:_destroy()
 	end
 	table.clear(self._playbacks)
 	table.clear(self._clockStates)

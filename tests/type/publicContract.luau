@@ -2,7 +2,7 @@
 
 local Types = require(script.Parent.Parent.pulse.pulse.types)
 local Def = require(script.Parent.Parent.pulse.pulse.types.def)
-local RuntimeTypes = require(script.Parent.Parent.pulse.pulse.types.managers.runtimeManager)
+local OwnershipTypes = require(script.Parent.Parent.pulse.pulse.types.internal.ownership)
 
 type Direction = {
 	name: "forward" | "backward",
@@ -115,73 +115,16 @@ local function proveHeterogeneousRuntime(
 	alphaPlayback:setParam("payload", betaPlayback:getParam("payload"))
 end
 
-local function erasePlayback<StepT, PhaseT, DirectionT>(
-	sequence: Types.Sequence<StepT>,
-	options: Types.PlaybackOptions<StepT, PhaseT, DirectionT>
-): RuntimeTypes.PlaybackOwned
-	local clock = options.clock
-	return {
-		terminate = function(_status, _reason)
-			local _sequence = sequence
-		end,
-		reconcileClockChange = function(change)
-			local _sample: unknown = clock:read()
-			local _continuous = not change.discontinuous
-		end,
-		runContinuous = function(_now)
-			local _phase: PhaseT = options.phase
-		end,
-		dispose = function()
-			local _direction: DirectionT = options.directions.forward
-		end,
-	}
-end
-
-local function makeClockPort<PhaseT, DirectionT>(clock: Types.Clock<PhaseT, DirectionT>): RuntimeTypes.ClockStatePort
-	return {
-		sameClock = function(candidate: unknown): boolean
-			return candidate == clock
-		end,
-		bindChanged = function(callback, _invalid): Types.Release
-			return clock:bindToChanged(function(rawChange: unknown)
-				callback(Def.assertClockChange(rawChange))
-			end, false)
-		end,
-		isDestroyed = function(): boolean
-			return clock:isDestroyed()
-		end,
-	}
-end
-
-local function makePhasePort<PhaseT, DirectionT>(clock: Types.Clock<PhaseT, DirectionT>, phase: PhaseT): RuntimeTypes.PhaseGroupPort
-	return {
-		samePhase = function(candidate: unknown): boolean
-			return candidate == phase
-		end,
-		bind = function(callback): Types.Release
-			return clock:bindPhase(phase, callback)
-		end,
-	}
-end
-
-local function proveErasedOwners<StepA, PhaseA, DirectionA, StepB, PhaseB, DirectionB>(
-	sequenceA: Types.Sequence<StepA>,
-	optionsA: Types.PlaybackOptions<
-		StepA,
-		PhaseA,
-		DirectionA
-	>,
-	sequenceB: Types.Sequence<StepB>,
-	optionsB: Types.PlaybackOptions<
-		StepB,
-		PhaseB,
-		DirectionB
-	>
-): { RuntimeTypes.PlaybackOwned }
-	return {
-		erasePlayback(sequenceA, optionsA),
-		erasePlayback(sequenceB, optionsB),
-	}
+local function proveNarrowOwnership(
+	runtime: OwnershipTypes.RuntimeOwner,
+	playback: OwnershipTypes.PlaybackOwned,
+	change: Types.ClockChange
+)
+	runtime:_registerPlayback(playback)
+	playback:_reconcileClockChange(change)
+	playback:_runContinuous(change.currentTimePosition)
+	runtime:_detachPlayback(playback)
+	playback:_dispose()
 end
 
 local function authorCanonicalRecords(builder: Types.Builder<AuthorStep>)
@@ -264,10 +207,7 @@ return {
 	proveProviderConformance = proveProviderConformance,
 	proveReaderConformance = proveReaderConformance,
 	proveHeterogeneousRuntime = proveHeterogeneousRuntime,
-	erasePlayback = erasePlayback,
-	makeClockPort = makeClockPort,
-	makePhasePort = makePhasePort,
-	proveErasedOwners = proveErasedOwners,
+	proveNarrowOwnership = proveNarrowOwnership,
 	authorCanonicalRecords = authorCanonicalRecords,
 	proveLifecycleRecords = proveLifecycleRecords,
 }

@@ -653,25 +653,46 @@ than widened or routed through `any`.
 
 The public `Runtime` is deliberately nongeneric. Its private collections do not
 store generic `PlaybackImpl<StepT, PhaseT, DirectionT>` values. The generic
-factory constructs each typed implementation, then registers a narrow
-nongeneric `PlaybackOwned` view containing only closure operations such as
-`terminate`, `reconcileClockChange`, `runContinuous`, and `dispose`. Those
-closures retain the typed implementation in lexical scope; Runtime never reads
-its sequence, step, phase, direction token, or callbacks and never casts an
-erased value back to a generic type.
+factory constructs each typed implementation, then registers that same object
+through a narrow nongeneric `PlaybackOwned` method view: `_terminate`,
+`_reconcileClockChange`, `_runContinuous`, and `_dispose`. `PlaybackImpl` also
+satisfies `PlaybackContextPort`, so `Context` borrows the Playback directly.
+There is no per-playback owned table, context forwarding table, clock/phase
+port, or Runtime link. Runtime never reads a Playback's sequence, step, phase,
+direction token, or callbacks and never casts an erased value back to a generic
+type.
 
-For the same reason, ClockState and PhaseGroup use stable owner-record arrays,
-not `{ [any]: ... }` maps. A ClockState creation port captures the typed clock
-and exposes only `sameClock(candidate: unknown)`, `bindChanged`, and destroyed
-checks. A PhaseGroup creation port captures that same typed clock plus phase and
-exposes only `samePhase(candidate: unknown)` and `bind(callback)`. Runtime scans
-the small stable record arrays by these identity predicates; playback-owned
-closures perform all typed clock scheduling. This is the concrete existential
-erasure boundary. A strict fixture must create heterogeneous StepT, PhaseT, and
-DirectionT playbacks in one Runtime and prove there is no broad `any` in
-Runtime, ClockState, PhaseGroup, or owner-link types. If Luau cannot type this
-closure boundary without `any`, M0 stops for contract review rather than
-hiding a cast.
+For the same reason, Runtime, ClockState, and PhaseGroup are method-bearing
+metatable owners, not closure packs or `{ [any]: ... }` maps. Runtime scans
+small stable object arrays by `_sameClock(candidate: unknown)` and
+`_samePhase(candidate: unknown)`. A ClockState is created from the exact typed
+clock and owns the sole changed subscription for that clock state. A PhaseGroup
+is created lazily only when the first updating Playback joins an exact
+clock/phase pair, and owns that pair's sole continuous subscription. These
+provider callbacks retain their ClockState or PhaseGroup object, never the
+first Playback as a representative. Playback-owned methods perform typed
+deadline scheduling. This is the concrete existential erasure boundary. The
+strict mixed-generic fixture proves there is no broad `any` in Runtime,
+ClockState, PhaseGroup, or ownership types.
+
+### M1 structural ownership and allocation map
+
+| Lifetime | Owner and allocation | Release condition |
+| --- | --- | --- |
+| Runtime | One method-bearing Runtime object; Playbacks store a narrowed borrow of this same object | `Runtime:destroy()` |
+| Playback | One Playback object plus its semantic state records and one Context borrowing the Playback directly; **zero adapter/forwarding closures** | terminal detach and private disposal |
+| Exact borrowed clock in one Runtime | One ClockState object and one provider changed callback | last Playback on that clock detaches |
+| Active exact clock/phase pair | One lazily created PhaseGroup object and one provider phase callback | last updating Playback leaves; event-only Playback creates no group |
+| Scheduled reached task | One provider callback capturing the task identity required to reject stale delivery | task cancel, replacement, or delivery |
+| Observer registration / queued authored mutation | One semantic callback or release closure where caller identity or authored work must be retained | observer release, dispatch, or terminal clear |
+
+Before structural normalization, each Playback constructor allocated about 31
+adapter closures: 17 context, 4 owned, 3 clock, 2 phase, and 5 Runtime-link
+forwarders. After normalization it allocates none. The remaining callbacks are
+provider- or authored-work allocations with real identity/lifetime semantics,
+not interface forwarding. Existing fake-clock tests prove zero phase bindings
+for event-only Playback, one changed binding per exact clock, and one phase
+binding per active exact clock/phase group.
 
 `playbackSpeed` must be finite and may be positive, zero, or negative. Zero
 keeps status `playing` and update-group membership while producing zero
@@ -1441,6 +1462,28 @@ Combined former scope: CP-P2 + CP-P3.
 - **KEEP TEMPO** through this milestone.
 
 **Recovery commit 2:** `feat(runtime): add bidirectional borrowed-clock playback`.
+
+### M1 structural normalization checkpoint — execution ownership
+
+This behavior-preserving checkpoint lands after M1 and before any M2 addressing,
+rebuild, cleanup-retention, or lifecycle semantics:
+
+- make Playback itself satisfy `PlaybackOwned` and `PlaybackContextPort`, and
+  make Runtime, ClockState, and PhaseGroup method-bearing owners;
+- remove the approximately 31 per-playback adapter closures and create
+  PhaseGroup only for active continuous updates;
+- move implementation records and ownership capabilities into internal type
+  leaves without expanding the root exports;
+- split temporal execution into one-way stateless modules: timeline coordinate
+  math; reconciliation/traversal; scheduling/anchors; and the Playback
+  facade/lifecycle owner;
+- preserve public contracts, boundary ordering, the 4,096 work limit,
+  reconciliation results, and completion reasons;
+- **KEEP TEMPO** `^0.2.0`, its lock entry, and the production adapter through
+  M2; dependency removal remains M3-only.
+
+**Structural checkpoint commit:**
+`refactor(playback): separate temporal execution internals`.
 
 ### M2 — Addressing, rebuild, and lifecycle completion
 
