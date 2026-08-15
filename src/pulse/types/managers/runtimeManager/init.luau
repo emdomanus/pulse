@@ -40,7 +40,7 @@ export type Runtime = {
 }
 
 export type PlaybackOwned = {
-	terminate: (status: TerminalStatus, reason: string?) -> (),
+	terminate: (status: TerminalStatus, reason: string?, err: unknown?) -> (),
 	reconcileClockChange: (change: ClockChange) -> (),
 	runContinuous: (now: number) -> (),
 	dispose: () -> (),
@@ -48,7 +48,7 @@ export type PlaybackOwned = {
 
 export type ClockStatePort = {
 	sameClock: (candidate: unknown) -> boolean,
-	bindChanged: (callback: ClockChangedCallback) -> Release,
+	bindChanged: (callback: ClockChangedCallback, invalid: (err: unknown) -> ()) -> Release,
 	isDestroyed: () -> boolean,
 }
 
@@ -69,6 +69,20 @@ export type ClockStateOwned = {
 	playbacks: { PlaybackOwned },
 	groups: { PhaseGroupOwned },
 	releaseChanged: Release?,
+}
+
+export type PlaybackRuntimeLink = {
+	register: (playback: PlaybackOwned) -> (),
+	activate: (
+		playback: PlaybackOwned,
+		clock: ClockStatePort,
+		phase: PhaseGroupPort,
+		clockCandidate: unknown,
+		phaseCandidate: unknown
+	) -> boolean,
+	setUpdating: (playback: PlaybackOwned, updating: boolean) -> (),
+	detach: (playback: PlaybackOwned) -> (),
+	isDestroyed: () -> boolean,
 }
 
 export type RuntimeImpl = Runtime & {

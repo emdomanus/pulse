@@ -16,7 +16,6 @@ export type PlaybackPosition = DefTypes.PlaybackPosition
 export type LoopChange = DefTypes.LoopChange
 export type Context<StepT = StepId> = ContextTypes.Context<StepT>
 export type Sequence<StepT = StepId> = SequenceTypes.Sequence<StepT>
-type SequenceImpl<StepT = StepId> = SequenceTypes.SequenceImpl<StepT>
 
 export type EndedCallback = (completion: Completion) -> ()
 export type LoopedCallback = (change: LoopChange) -> ()
@@ -53,13 +52,6 @@ export type Playback<StepT = StepId> = {
 	getPlaybackSpeed: (self: Playback<StepT>) -> number,
 	seek: (self: Playback<StepT>, address: SequenceAddress) -> boolean,
 	getPosition: (self: Playback<StepT>) -> PlaybackPosition,
-}
-
-export type PlaybackImpl<StepT = StepId> = Playback<StepT> & {
-	_sequence: SequenceImpl<StepT>,
-	_context: Context<StepT>,
-	_status: Status,
-	_completion: Completion?,
 }
 
 return {}

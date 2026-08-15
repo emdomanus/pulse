@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-	[string]$Fixture = "tests\lune\benchmarks\catchUp.bench.luau"
+	[string]$Fixture = "tests\lune\benchmarks\reconciliation.bench.luau"
 )
 
 $ErrorActionPreference = "Stop"

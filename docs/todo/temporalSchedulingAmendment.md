@@ -1236,11 +1236,18 @@ immediately without fabricating a new boundary crossing. Starting at either
 terminal with zero effective sequence direction remains playing until direction
 becomes inward or outward; becoming outward completes immediately.
 
-An internal catch-up work limit fails with a stable Pulse error rather than
-silently skipping work in either direction. Its value is chosen after the fake
-clock benchmark in M0 and traversal profiling in M1; this plan does not freeze
-`10_000`. Whatever value is selected must be tested immediately below, at, and
-above the boundary and documented. Cooperative continuation is deferred.
+The M1 implementation uses a finite limit of **4,096 committed event
+occurrences or loop boundaries per top-level reconcile**. Attempting the 4,097th
+unit fails the playback deterministically with `catchUpLimitExceeded`; no event
+or boundary is folded or silently discarded. On the 2026-08-15 Lune 0.8.9 M1
+benchmark, the actual borrowed-clock reconciliation path processed 512, 1,024,
+2,048, and 4,096 authored occurrences with five-run medians of approximately
+0.84 ms, 1.71 ms, 3.91 ms, and 10.09 ms respectively. The 4,096 sample ranged
+from 8.15 ms to 11.62 ms (about 406,000 occurrences/second at the median). The
+limit keeps a pathological synchronous catch-up near the measured 10 ms range
+on the profiling host while remaining far above normal authored bursts. Tests
+lock success at 4,095 and 4,096 and explicit failure at 4,097. Cooperative
+continuation remains deferred.
 
 ## Addressing, seek, and replay semantics
 
@@ -1771,10 +1778,11 @@ to bind independently.
 7. **Phase identity.** Accepted: group by exact supplied value and require
    composition to pass canonical phase tokens. Pulse does not own a phase
    registry.
-8. **Catch-up safety value.** Accepted: failure instead of silent loss.
-   M0 profiling selects and documents the finite per-reconcile value; no
-   unprofiled `10_000` constant is part of this contract, so the number itself
-   is not a pre-implementation blocker.
+8. **Catch-up safety value.** Accepted: failure instead of silent loss. M0's
+   provider-callback benchmark established the measurement harness; M1's actual
+   reconciliation profile selected 4,096 committed occurrences or loop
+   boundaries per reconcile, as documented above. The 4,097th unit fails with
+   `catchUpLimitExceeded`.
 
 The contract is technically implementable as written; no unresolved algorithmic
 or approval blocker remains. After the accelerated design commit, work may begin

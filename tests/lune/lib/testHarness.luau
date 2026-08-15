@@ -74,9 +74,9 @@ function TestHarness.run()
 	end
 
 	if failed > 0 then
-		error(`Pulse M0 specs failed: {failed} failed`, 0)
+		error(`Pulse specs failed: {failed} failed`, 0)
 	end
-	print(`Pulse M0 specs: {passed} passed, {failed} failed`)
+	print(`Pulse specs: {passed} passed, {failed} failed`)
 end
 
 return TestHarness

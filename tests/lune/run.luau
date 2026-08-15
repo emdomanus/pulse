@@ -6,5 +6,6 @@ local Harness = requireAny("./lib/testHarness")
 requireAny("./specs/compiler.spec")
 requireAny("./specs/fakeClock.spec")
 requireAny("./specs/fakeRealTimeScheduler.spec")
+requireAny("./specs/runtime.spec")
 
 Harness.run()

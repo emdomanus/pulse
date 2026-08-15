@@ -142,7 +142,7 @@ local function makeClockPort<PhaseT, DirectionT>(clock: Types.Clock<PhaseT, Dire
 		sameClock = function(candidate: unknown): boolean
 			return candidate == clock
 		end,
-		bindChanged = function(callback): Types.Release
+		bindChanged = function(callback, _invalid): Types.Release
 			return clock:bindToChanged(function(rawChange: unknown)
 				callback(Def.assertClockChange(rawChange))
 			end, false)
