@@ -1147,6 +1147,13 @@ live playbacks.
   stack. Playback generation and task-id checks make stale callbacks no-ops;
   the central reconcile loop is non-recursive and applies queued nonterminal
   callback mutations after the current occurrence commit point.
+- A continuous change delivered inside authored, lifecycle, update, signal, or
+  observer dispatch captures its validated clock sample in notification order
+  and enters the mutation queue at that callback's commit point. The central
+  loop catches up to that sample under the prior mapping before applying a sign
+  transition; the notification stack never writes the cursor or anchors
+  recursively. Terminal changes and terminal playback mutations remain
+  immediate interrupts.
 
 ## Playback anchor and rescheduling rules
 
@@ -1248,6 +1255,12 @@ limit keeps a pathological synchronous catch-up near the measured 10 ms range
 on the profiling host while remaining far above normal authored bursts. Tests
 lock success at 4,095 and 4,096 and explicit failure at 4,097. Cooperative
 continuation remains deferred.
+
+Finite clock, anchor, speed, and checkpoint inputs can still overflow floating
+point arithmetic. A non-finite forward anchor derivation, inverse checkpoint
+mapping, or continuous sequence delta fails the playback with the stable
+internal reason `numericOverflow`; the arithmetic failure never escapes a
+reached or phase callback.
 
 ## Addressing, seek, and replay semantics
 

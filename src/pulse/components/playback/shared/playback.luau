@@ -69,6 +69,12 @@ type WorkState = {
 	count: number,
 }
 
+type PendingClockChange = {
+	sample: ClockSample,
+	stage: "catchUp" | "reorient",
+	requiresRefresh: boolean,
+}
+
 type PlaybackImpl<StepT, PhaseT, DirectionT> = Playback<StepT> & {
 	_sequence: SequenceImpl<StepT>,
 	_clock: Clock<PhaseT, DirectionT>,
@@ -109,6 +115,9 @@ type PlaybackImpl<StepT, PhaseT, DirectionT> = Playback<StepT> & {
 	_pendingClockPosition: number?,
 	_pendingUpdate: boolean,
 	_pendingObservedDirection: DirectionT?,
+	_activeClockChange: PendingClockChange?,
+	_queuedClockChanges: { PendingClockChange },
+	_scheduleRefreshPending: boolean,
 	_callbackDepth: number,
 	_flushingMutations: boolean,
 	_queuedMutations: { () -> () },
@@ -143,6 +152,7 @@ local requestReconcile: <StepT, PhaseT, DirectionT>(
 ) -> ()
 local refreshScheduling: <StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>) -> ()
 local flushMutations: <StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>) -> ()
+local drainReconciliation: <StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>) -> ()
 
 local function isFinite(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
@@ -291,10 +301,31 @@ local function readClock<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, Ph
 	return (result :: unknown) :: ClockSample
 end
 
-local function sequenceAtClock<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>, clockPosition: number): number
+local function sequenceAtClock<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>, clockPosition: number): number?
 	local result = self._anchorSequence + (clockPosition - self._anchorClock) * self._playbackSpeed
-	assert(isFinite(result), "Pulse playback anchor produced a non-finite sequence position")
+	if not isFinite(result) then
+		terminate(self, "failed", "numericOverflow", "Pulse playback anchor produced a non-finite sequence position")
+		return nil
+	end
 	return result
+end
+
+local function clockAtSequence<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>, sequencePosition: number): number?
+	local result = self._anchorClock + (sequencePosition - self._anchorSequence) / self._playbackSpeed
+	if not isFinite(result) then
+		terminate(self, "failed", "numericOverflow", "Pulse checkpoint mapping produced a non-finite clock position")
+		return nil
+	end
+	return result
+end
+
+local function enqueueClockChange<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>, sample: ClockSample)
+	table.insert(self._queuedClockChanges, {
+		sample = sample,
+		stage = "catchUp",
+		requiresRefresh = false,
+	})
+	self._mutationGeneration += 1
 end
 
 local function queueMutation<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>, mutation: () -> ()): boolean
@@ -311,14 +342,21 @@ flushMutations = function<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, P
 	end
 	self._flushingMutations = true
 	while isAliveStatus(self._status) and #self._queuedMutations > 0 do
+		local queuedClockChangeCount = #self._queuedClockChanges
 		local mutation = table.remove(self._queuedMutations, 1)
 		assert(mutation ~= nil, "Pulse queued mutation invariant failed")
 		mutation()
+		if #self._queuedClockChanges > queuedClockChangeCount then
+			break
+		end
 	end
 	if not isAliveStatus(self._status) then
 		table.clear(self._queuedMutations)
 	end
 	self._flushingMutations = false
+	if self._status == "playing" and not self._reconciling and #self._queuedClockChanges > 0 then
+		drainReconciliation(self)
+	end
 end
 
 local function firstAtOrAfter<StepT>(events: { CompiledEvent<StepT> }, target: number): number
@@ -966,11 +1004,76 @@ local function expectedTraversalDirection<StepT, PhaseT, DirectionT>(
 	return nil
 end
 
+local function processClockChange<StepT, PhaseT, DirectionT>(
+	self: PlaybackImpl<StepT, PhaseT, DirectionT>,
+	pending: PendingClockChange,
+	work: WorkState
+): boolean
+	if self._clock:isDestroyed() then
+		terminate(self, "destroyed", "clockDestroyed", nil)
+		return false
+	end
+
+	if pending.stage == "catchUp" then
+		local target = sequenceAtClock(self, pending.sample.timePosition)
+		if target == nil then
+			return false
+		end
+		local traversal: TraversalDirection?
+		if target > self._position then
+			traversal = "forward"
+		elseif target < self._position then
+			traversal = "backward"
+		else
+			traversal = expectedTraversalDirection(self, self._lastClockRate, nil)
+		end
+		if traversal ~= nil then
+			local workCountBefore = work.count
+			local reconciled = reconcileToward(self, target, traversal, work)
+			if work.count > workCountBefore then
+				pending.requiresRefresh = true
+			end
+			if not reconciled then
+				return false
+			end
+		else
+			self._position = target
+		end
+
+		local previousRateSign = sign(self._lastClockRate)
+		local currentRateSign = sign(pending.sample.rate)
+		self._lastClockRate = pending.sample.rate
+		if currentRateSign == previousRateSign then
+			self._scheduleRefreshPending = self._scheduleRefreshPending or pending.requiresRefresh
+			self._activeClockChange = nil
+			return true
+		end
+
+		self._anchorClock = pending.sample.timePosition
+		self._anchorSequence = target
+		self._position = target
+		cancelTask(self)
+		self._scheduleRefreshPending = true
+		pending.stage = "reorient"
+	end
+
+	local traversal: TraversalDirection? = expectedTraversalDirection(self, self._lastClockRate, nil)
+	if traversal ~= nil and not reconcileToward(self, self._position, traversal, work) then
+		return false
+	end
+	self._activeClockChange = nil
+	return true
+end
+
 local function runUpdates<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>)
 	if self._status ~= "playing" then
 		return
 	end
 	local delta = self._position - self._lastContinuousPosition
+	if not isFinite(delta) then
+		terminate(self, "failed", "numericOverflow", "Pulse continuous sequence delta is non-finite")
+		return
+	end
 	self._lastContinuousPosition = self._position
 	local current = localTimePosition(self)
 	for _, update in self._sequence.updates do
@@ -982,7 +1085,76 @@ local function runUpdates<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, P
 		end
 		flushMutations(self)
 		if self._status ~= "playing" or self._mutationGeneration ~= generation then
+			if self._status == "playing" and not self._pendingReconcile then
+				local sample = readClock(self)
+				if self._status == "playing" then
+					self._pendingReconcile = true
+					self._pendingClockPosition = sample.timePosition
+				end
+			end
 			return
+		end
+	end
+end
+
+drainReconciliation = function<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>)
+	if self._reconciling or self._callbackDepth > 0 or self._flushingMutations or self._status ~= "playing" then
+		return
+	end
+
+	self._reconciling = true
+	local work: WorkState = { count = 0 }
+	while self._status == "playing" do
+		if self._activeClockChange == nil and #self._queuedClockChanges == 0 and #self._queuedMutations > 0 then
+			flushMutations(self)
+		end
+		if self._activeClockChange == nil and #self._queuedClockChanges > 0 then
+			self._activeClockChange = table.remove(self._queuedClockChanges, 1)
+		end
+		local activeClockChange = self._activeClockChange
+		if activeClockChange ~= nil then
+			processClockChange(self, activeClockChange, work)
+		elseif self._pendingReconcile then
+			self._pendingReconcile = false
+			local pendingPosition = self._pendingClockPosition
+			self._pendingClockPosition = nil
+			local pendingObserved = self._pendingObservedDirection
+			self._pendingObservedDirection = nil
+			if pendingPosition == nil then
+				pendingPosition = readClock(self).timePosition
+			end
+			if self._status ~= "playing" then
+				break
+			end
+			local target = sequenceAtClock(self, pendingPosition :: number)
+			if target == nil then
+				break
+			end
+			local traversal: TraversalDirection?
+			if target > self._position then
+				traversal = "forward"
+			elseif target < self._position then
+				traversal = "backward"
+			else
+				traversal = expectedTraversalDirection(self, self._lastClockRate, pendingObserved)
+			end
+			if traversal ~= nil then
+				reconcileToward(self, target, traversal, work)
+			else
+				self._position = target
+			end
+		elseif self._pendingUpdate then
+			self._pendingUpdate = false
+			runUpdates(self)
+		else
+			break
+		end
+	end
+	self._reconciling = false
+	if self._scheduleRefreshPending then
+		self._scheduleRefreshPending = false
+		if self._status == "playing" then
+			refreshScheduling(self)
 		end
 	end
 end
@@ -993,49 +1165,17 @@ requestReconcile = function<StepT, PhaseT, DirectionT>(
 	shouldRunUpdates: boolean,
 	observedDirection: DirectionT?
 )
-	assert(isFinite(clockPosition), "Pulse phase/reached clock position must be finite")
+	if not isFinite(clockPosition) then
+		terminate(self, "failed", "invalidClockSample", "Pulse phase/reached clock position must be finite")
+		return
+	end
 	self._pendingReconcile = true
 	self._pendingClockPosition = clockPosition
 	self._pendingUpdate = self._pendingUpdate or shouldRunUpdates
 	if observedDirection ~= nil then
 		self._pendingObservedDirection = observedDirection
 	end
-	if self._reconciling then
-		return
-	end
-
-	self._reconciling = true
-	local work: WorkState = { count = 0 }
-	while self._pendingReconcile and self._status == "playing" do
-		self._pendingReconcile = false
-		local pendingPosition = self._pendingClockPosition
-		self._pendingClockPosition = nil
-		local pendingObserved = self._pendingObservedDirection
-		self._pendingObservedDirection = nil
-		if pendingPosition == nil then
-			pendingPosition = readClock(self).timePosition
-		end
-		local target = sequenceAtClock(self, pendingPosition :: number)
-		local traversal: TraversalDirection?
-		if target > self._position then
-			traversal = "forward"
-		elseif target < self._position then
-			traversal = "backward"
-		else
-			traversal = expectedTraversalDirection(self, self._lastClockRate, pendingObserved)
-		end
-		if traversal ~= nil then
-			reconcileToward(self, target, traversal, work)
-		else
-			self._position = target
-		end
-	end
-	local shouldUpdate = self._pendingUpdate
-	self._pendingUpdate = false
-	self._reconciling = false
-	if shouldUpdate and self._status == "playing" then
-		runUpdates(self)
-	end
+	drainReconciliation(self)
 end
 
 local function onReached<StepT, PhaseT, DirectionT>(
@@ -1082,9 +1222,8 @@ refreshScheduling = function<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT
 		cancelTask(self)
 		return
 	end
-	local clockCheckpoint = self._anchorClock + (checkpoint - self._anchorSequence) / self._playbackSpeed
-	if not isFinite(clockCheckpoint) then
-		terminate(self, "failed", "invalidSchedule", "Pulse checkpoint mapping is non-finite")
+	local clockCheckpoint = clockAtSequence(self, checkpoint)
+	if clockCheckpoint == nil then
 		return
 	end
 	local clockDirection: DirectionT = if clockSign > 0 then self._directions.forward else self._directions.backward
@@ -1135,6 +1274,10 @@ terminate = function<StepT, PhaseT, DirectionT>(
 	self._runtimeLink.detach(self._owned)
 	self._attached = false
 	self._pendingReconcile = false
+	self._pendingUpdate = false
+	self._activeClockChange = nil
+	table.clear(self._queuedClockChanges)
+	self._scheduleRefreshPending = false
 	table.clear(self._queuedMutations)
 
 	local callback: (() -> ())? = nil
@@ -1199,23 +1342,16 @@ local function reconcileClockChange<StepT, PhaseT, DirectionT>(self: PlaybackImp
 	if self._status ~= "playing" then
 		return
 	end
-	local oldRateSign = sign(self._lastClockRate)
-	local current = sequenceAtClock(self, sample.timePosition)
-	requestReconcile(self, sample.timePosition, false, nil)
-	if self._status ~= "playing" then
+	if self._callbackDepth > 0 then
+		table.insert(self._queuedMutations, function()
+			if self._status == "playing" then
+				enqueueClockChange(self, sample)
+			end
+		end)
 		return
 	end
-	self._anchorClock = sample.timePosition
-	self._anchorSequence = current
-	self._position = current
-	self._lastClockRate = sample.rate
-	if sign(sample.rate) ~= oldRateSign then
-		cancelTask(self)
-		requestReconcile(self, sample.timePosition, false, nil)
-		if self._status == "playing" then
-			refreshScheduling(self)
-		end
-	end
+	enqueueClockChange(self, sample)
+	drainReconciliation(self)
 end
 
 local function runContinuous<StepT, PhaseT, DirectionT>(self: PlaybackImpl<StepT, PhaseT, DirectionT>, now: number)
@@ -1415,6 +1551,9 @@ function Playback.new<StepT, PhaseT, DirectionT>(
 			_pendingClockPosition = nil,
 			_pendingUpdate = false,
 			_pendingObservedDirection = nil,
+			_activeClockChange = nil,
+			_queuedClockChanges = {},
+			_scheduleRefreshPending = false,
 			_callbackDepth = 0,
 			_flushingMutations = false,
 			_queuedMutations = {},
@@ -1768,6 +1907,9 @@ function Playback.getPosition<StepT, PhaseT, DirectionT>(self: PlaybackImpl<Step
 			return positionRecord(self)
 		end
 		local derived = sequenceAtClock(self, sample.timePosition)
+		if derived == nil then
+			return positionRecord(self)
+		end
 		if derived ~= self._position then
 			local duration = self._sequence.duration
 			if not self._sequence.loop then

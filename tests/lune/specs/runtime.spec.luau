@@ -655,6 +655,319 @@ Harness.test("clock sign change before deadline invalidates stale reached direct
 	runtime:destroy()
 end)
 
+Harness.test("callback same-sign clock change preserves late catch-up", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local order: { string } = {}
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			duration = 3,
+			events = {
+				{
+					time = 1,
+					run = function()
+						table.insert(order, "one")
+						clock:setRate(2)
+					end,
+					reverse = "ignore",
+				},
+				{
+					time = 2,
+					run = function()
+						table.insert(order, "two")
+					end,
+					reverse = "ignore",
+				},
+			},
+		}),
+		clock,
+		"simulation"
+	)
+	playback:play()
+	clock:stepRootTo(2.5, "simulation")
+	Harness.assertArrayEqual(order, { "one", "two" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 2.5)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	playback:stop()
+	runtime:destroy()
+end)
+
+Harness.test("callback clock sign change catches up before reversing its deadline", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local order: { string } = {}
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			duration = 3,
+			events = {
+				{
+					time = 1,
+					run = function()
+						table.insert(order, "f1")
+						clock:setRate(-1)
+					end,
+					reverse = function()
+						table.insert(order, "r1")
+					end,
+				},
+				{
+					time = 2,
+					run = function()
+						table.insert(order, "f2")
+					end,
+					reverse = function()
+						table.insert(order, "r2")
+					end,
+				},
+			},
+		}),
+		clock,
+		"simulation"
+	)
+	playback:play()
+	clock:stepRootTo(2.5, "simulation")
+	Harness.assertArrayEqual(order, { "f1", "f2" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 2.5)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	clock:stepRootTo(3.1, "simulation")
+	Harness.assertArrayEqual(order, { "f1", "f2", "r2" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 1.9)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	clock:stepRootTo(4.1, "simulation")
+	Harness.assertArrayEqual(order, { "f1", "f2", "r2", "r1" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 0.9)
+	playback:stop()
+	runtime:destroy()
+end)
+
+Harness.test("signal callback clock change defers late catch-up until callback commit", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local order: { string } = {}
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			duration = 3,
+			signals = {
+				retime = function()
+					table.insert(order, "signal:start")
+					clock:setRate(2)
+					table.insert(order, "signal:end")
+				end,
+			},
+			events = {
+				{
+					time = 1,
+					run = function()
+						table.insert(order, "one")
+					end,
+					reverse = "ignore",
+				},
+				{
+					time = 2,
+					run = function()
+						table.insert(order, "two")
+					end,
+					reverse = "ignore",
+				},
+			},
+		}),
+		clock,
+		"simulation"
+	)
+	playback:play()
+	clock:advanceRootTo(1.5)
+	playback:signal("retime")
+	Harness.assertArrayEqual(order, { "signal:start", "signal:end", "one" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 1.5)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	Harness.assertNear(clock:getTaskWakeAtRoot(1), 1.75)
+	clock:stepRootTo(1.75, "simulation")
+	Harness.assertArrayEqual(order, { "signal:start", "signal:end", "one", "two" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 2)
+	playback:stop()
+	runtime:destroy()
+end)
+
+Harness.test("multiple callback clock changes converge in notification order", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local order: { string } = {}
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			duration = 3,
+			events = {
+				{
+					time = 1,
+					run = function()
+						table.insert(order, "one")
+						clock:setRate(2)
+						clock:setRate(-1)
+						clock:setRate(3)
+					end,
+					reverse = "ignore",
+				},
+				{
+					time = 2,
+					run = function()
+						table.insert(order, "two")
+					end,
+					reverse = "ignore",
+				},
+			},
+		}),
+		clock,
+		"simulation"
+	)
+	playback:play()
+	clock:stepRootTo(2.5, "simulation")
+	Harness.assertArrayEqual(order, { "one", "two" })
+	Harness.assertNear(playback:getPosition().unwrappedTimePosition, 2.5)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	clock:stepRootTo(2.7, "simulation")
+	Harness.assertEqual(playback:getStatus(), "completed")
+	Harness.assertArrayEqual(order, { "one", "two" })
+	runtime:destroy()
+end)
+
+Harness.test("terminal callback mutation interrupts queued clock changes immediately", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local order: { string } = {}
+	local ended = 0
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			duration = 3,
+			events = {
+				{
+					time = 1,
+					run = function(ctx: any)
+						table.insert(order, "one")
+						clock:setRate(2)
+						ctx:stop("terminalAfterClockChange")
+					end,
+					reverse = "ignore",
+				},
+				{
+					time = 2,
+					run = function()
+						table.insert(order, "stale")
+					end,
+					reverse = "ignore",
+				},
+			},
+		}),
+		clock,
+		"simulation"
+	)
+	playback:onEnded(function()
+		ended += 1
+	end)
+	playback:play()
+	clock:stepRootTo(2.5, "simulation")
+	Harness.assertArrayEqual(order, { "one" })
+	Harness.assertEqual(playback:getStatus(), "stopped")
+	Harness.assertEqual(playback:getCompletion().reason, "terminalAfterClockChange")
+	Harness.assertEqual(ended, 1)
+	Harness.assertEqual(clock:getTaskCount(), 0)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	runtime:destroy()
+end)
+
+Harness.test("derived sequence overflow fails reached evaluation and releases ownership", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local ended = 0
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			duration = 10,
+			events = {
+				{
+					time = 1,
+					run = function() end,
+					reverse = "ignore",
+				},
+			},
+		}),
+		clock,
+		"simulation",
+		{
+			playbackSpeed = 1e308,
+		}
+	)
+	playback:onEnded(function()
+		ended += 1
+	end)
+	playback:play()
+	local ok = pcall(function()
+		clock:stepRootTo(2, "simulation")
+	end)
+	Harness.assertTrue(ok)
+	Harness.assertEqual(playback:getStatus(), "failed")
+	local completion = playback:getCompletion()
+	Harness.assertEqual(completion.reason, "numericOverflow")
+	Harness.assertEqual(playback:getCompletion(), completion)
+	Harness.assertEqual(ended, 1)
+	Harness.assertEqual(clock:getTaskCount(), 0)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	Harness.assertFalse(clock:isDestroyed())
+
+	local teardownOk = pcall(function()
+		playback:destroy()
+		playback:stop()
+		runtime:destroy()
+		runtime:destroy()
+	end)
+	Harness.assertTrue(teardownOk)
+	Harness.assertEqual(playback:getCompletion(), completion)
+	Harness.assertEqual(ended, 1)
+end)
+
+Harness.test("derived sequence overflow fails updating evaluation and releases ownership", function()
+	local clock = FakeClock.new()
+	local runtime = Pulse.new()
+	local updates = 0
+	local playback = createPlayback(
+		runtime,
+		Pulse.sequence({
+			updates = {
+				{
+					run = function()
+						updates += 1
+					end,
+				},
+			},
+		}),
+		clock,
+		"simulation",
+		{
+			playbackSpeed = 1e308,
+		}
+	)
+	playback:play()
+	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	local ok = pcall(function()
+		clock:stepRootTo(2, "simulation")
+	end)
+	Harness.assertTrue(ok)
+	Harness.assertEqual(updates, 0)
+	Harness.assertEqual(playback:getStatus(), "failed")
+	Harness.assertEqual(playback:getCompletion().reason, "numericOverflow")
+	Harness.assertEqual(clock:getTaskCount(), 0)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	Harness.assertFalse(clock:isDestroyed())
+	playback:destroy()
+	runtime:destroy()
+end)
+
 local function runCatchUpCase(workCount: number): (number, string, string?)
 	local clock = FakeClock.new()
 	local runtime = Pulse.new()
