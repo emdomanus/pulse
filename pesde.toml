@@ -4,6 +4,7 @@ description = "A small generic sequence playback runtime for Roblox."
 license = "MIT"
 authors = ["emdomanus"]
 repository = "https://github.com/emdomanus/pulse"
+private = true
 
 includes = [
 	"pesde.toml",

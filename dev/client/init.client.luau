@@ -1,516 +1,445 @@
 --!strict
 
-local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local AtomStage = require(script.atomStage)
+local LiveClock = require(script.liveClock)
+local HarnessUi = require(script.harnessUi)
 
 local packages = ReplicatedStorage:WaitForChild("packages")
 local Pulse = require(packages:WaitForChild("pulse"))
-local Tempo = require(packages:WaitForChild("roblox_packages"):WaitForChild("tempo"))
 
-type LoopStepId = "orbit"
-type GatedStepId = "start" | "charge" | "release" | "finish"
-type CleanupStepId = "burst" | "done"
-type AnyPlayback = Pulse.Playback<any>
+type AddressPolicy = Pulse.AddressPolicy
+type Playback = Pulse.Playback
+type PlaybackContext = Pulse.PlaybackContext
+type Sequence = Pulse.Sequence
+type StageController = AtomStage.Controller
+type ScenarioKey = HarnessUi.ScenarioKey
+type UiController = HarnessUi.Controller
 
-local player = Players.LocalPlayer
-
-local tempo = Tempo.new({
-	protected = true,
-})
-
-RunService.Heartbeat:Connect(tempo:evaluatePhase(tempo.phases.heartbeat))
-
-local runtime = Pulse.runtime.new({
-	tempo = tempo,
-	phase = tempo.phases.heartbeat,
-})
-
-local activePlayback: AnyPlayback? = nil
-local activeName = "none"
-local activeScale = 1
-
-local logLines: { string } = {}
-local atomOrigin = Vector3.new(0, 8, 0)
-local nucleusColorA = Color3.fromRGB(255, 80, 70)
-local nucleusColorB = Color3.fromRGB(80, 180, 255)
-local gatedColor = Color3.fromRGB(255, 235, 130)
-
-local visualFolder = Instance.new("Folder")
-visualFolder.Name = "PulseDevAtom"
-visualFolder.Parent = Workspace
-
-local function createSphere(name: string, size: number, color: Color3): Part
-	local part = Instance.new("Part")
-	part.Name = name
-	part.Shape = Enum.PartType.Ball
-	part.Material = Enum.Material.Neon
-	part.Color = color
-	part.Size = Vector3.new(size, size, size)
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Parent = visualFolder
-
-	return part
-end
-
-local nucleus = createSphere("Nucleus", 2.25, nucleusColorA)
-local electrons: { Part } = {
-	createSphere("Electron1", 0.55, Color3.fromRGB(120, 230, 255)),
-	createSphere("Electron2", 0.55, Color3.fromRGB(180, 120, 255)),
-	createSphere("Electron3", 0.55, Color3.fromRGB(120, 255, 170)),
+type Scenario = {
+	key: ScenarioKey,
+	label: string,
+	policy: AddressPolicy,
+	looping: boolean,
+	sequence: Sequence,
 }
 
-local camera = Workspace.CurrentCamera
-if camera then
-	camera.CameraType = Enum.CameraType.Scriptable
-	camera.CFrame = CFrame.lookAt(atomOrigin + Vector3.new(0, 3.25, 13), atomOrigin)
-end
+type EventDirection = AtomStage.EventDirection
 
-local function setAtomVisible(visible: boolean)
-	local transparency = if visible then 0 else 1
-	nucleus.Transparency = transparency
+local player = Players.LocalPlayer
+local clock = LiveClock.new()
+local phase: LiveClock.Phase = "heartbeat"
+local adapter = Pulse.temporalAdapter(clock, phase, clock.directions)
 
-	for _, electron in electrons do
-		electron.Transparency = transparency
+local activePlayback: Playback? = nil
+local activeScenario: Scenario? = nil
+local configuredSpeed = 1
+local eventCount = 0
+local updateCount = 0
+local lastEvent = "waiting for playback"
+local lastEventDirection: EventDirection = "neutral"
+local logLines: { string } = {}
+local ui: UiController? = nil
+local stage: StageController? = nil
+
+local function record(message: string, direction: EventDirection?)
+	if direction ~= nil then
+		lastEventDirection = direction
+		lastEvent = message
 	end
-end
-
-local function updateAtom(timePosition: number, scale: number, gatedBlend: number)
-	local pulse = (math.sin(timePosition * math.pi * 2) + 1) * 0.5
-	local radius = 3.5 * scale
-	local baseColor = nucleusColorA:Lerp(nucleusColorB, pulse)
-
-	nucleus.CFrame = CFrame.new(atomOrigin)
-	nucleus.Color = baseColor:Lerp(gatedColor, gatedBlend)
-	nucleus.Size = Vector3.new(1, 1, 1) * ((2.25 + pulse * 0.4) * scale)
-
-	for index, electron in electrons do
-		local phase = (index - 1) * ((math.pi * 2) / #electrons)
-		local angle = timePosition * math.pi * 2 + phase
-		local tilt = CFrame.Angles(math.rad(65), phase, math.rad(25))
-		local localPosition = tilt:VectorToWorldSpace(Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius))
-
-		electron.CFrame = CFrame.new(atomOrigin + localPosition)
-	end
-end
-
-local function log(message: string)
-	local line = (`[{string.format("%.2f", os.clock())}] {message}`)
-	table.insert(logLines, line)
-
-	if #logLines > 12 then
+	local timePosition = clock:read().timePosition
+	table.insert(logLines, string.format("[%7.2f] %s", timePosition, message))
+	while #logLines > 6 do
 		table.remove(logLines, 1)
 	end
-
-	print("[Pulse Dev]", message)
+	print(`[Pulse Dev] {message}`)
+	local currentUi = ui
+	if currentUi ~= nil then
+		currentUi:setLogs(logLines)
+	end
 end
 
-local loopBuilder: Pulse.Builder<LoopStepId> = Pulse.builder()
-local loopSequence = loopBuilder
-	:duration(3)
-	:cleanupDelay(0.75)
-	:seekMode("procedural" :: "procedural")
-	:loop()
-	:param("scale", 1)
-	:step("orbit", 0, function(_ctx: Pulse.CallbackContext)
-		log("loop step orbit")
-	end)
-	:event(0, "orbit", function(ctx: Pulse.CallbackContext)
-		log(`loop event scale={ctx:getParam("scale")}`)
-	end)
-	:update("loopAtom", function(ctx: Pulse.CallbackContext, _dt: number, timePosition: number)
-		local scale = (ctx:getParam("scale") :: number?) or 1
-		updateAtom(timePosition, scale, 0)
-	end)
-	:onPlay(function(ctx: Pulse.CallbackContext)
-		setAtomVisible(true)
-		ctx:addCleanup(function()
-			setAtomVisible(false)
-			log("loop cleanup")
-		end)
-		log("loop play")
-	end)
-	:onLoop(function(_ctx: Pulse.CallbackContext, loopCount: number)
-		log(`loop count {loopCount}`)
-	end)
-	:onStop(function(_ctx: Pulse.CallbackContext, reason)
-		log(`loop stop {tostring(reason)}`)
-	end)
-	:onCancel(function(_ctx: Pulse.CallbackContext, reason)
-		setAtomVisible(false)
-		log(`loop cancel {tostring(reason)}`)
-	end)
-	:onDestroy(function()
-		setAtomVisible(false)
-		log("loop destroy")
-	end)
-	:onParamChanged(function(_ctx: Pulse.CallbackContext, name: string, value: any, oldValue: any?)
-		log(`loop param {name}: {tostring(oldValue)} -> {tostring(value)}`)
-	end)
-	:compile()
-
-local gatedBuilder: Pulse.Builder<GatedStepId> = Pulse.builder()
-local gatedSequence = gatedBuilder
-	:duration(2.35)
-	:cleanupDelay(1.25)
-	:seekMode("procedural" :: "procedural")
-	:param("scale", 1)
-	:step("start", 0, function(_ctx: Pulse.CallbackContext)
-		log("gated step start")
-	end)
-	:step("charge", 0.65, function(_ctx: Pulse.CallbackContext)
-		log("gated step charge")
-	end)
-	:step("release", 1.3, function(_ctx: Pulse.CallbackContext)
-		log("gated step release")
-	end)
-	:step("finish", 2, function(_ctx: Pulse.CallbackContext)
-		log("gated step finish")
-	end)
-	:event(0, "start", function(_ctx: Pulse.CallbackContext)
-		log("gated event start")
-	end)
-	:hold(0.65, "charge", "proceed")
-	:hold(1.3, "release", "proceed")
-	:event(2, "finish", function(_ctx: Pulse.CallbackContext)
-		log("gated event finish")
-	end)
-	:update("gatedAtom", function(ctx: Pulse.CallbackContext, _dt: number, timePosition: number)
-		local scale = (ctx:getParam("scale") :: number?) or 1
-		local gatedBlend = math.clamp(timePosition / 2, 0, 1)
-		updateAtom(timePosition * 0.75, scale, gatedBlend)
-	end)
-	:signal("proceed", function(ctx: Pulse.CallbackContext, payload)
-		log(`gated proceed {tostring(payload)}`)
-		ctx:resume()
-	end)
-	:onPlay(function(ctx: Pulse.CallbackContext)
-		setAtomVisible(true)
-		ctx:addCleanup(function()
-			setAtomVisible(false)
-			log("gated cleanup after delay")
-		end)
-		log("gated play")
-	end)
-	:onStep(function(_ctx: Pulse.CallbackContext, from, to)
-		log(`gated step {tostring(from)} -> {tostring(to)}`)
-	end)
-	:onStop(function(_ctx: Pulse.CallbackContext, reason)
-		log(`gated stop {tostring(reason)}`)
-	end)
-	:onCancel(function(_ctx: Pulse.CallbackContext, reason)
-		setAtomVisible(false)
-		log(`gated cancel {tostring(reason)}`)
-	end)
-	:onDestroy(function()
-		setAtomVisible(false)
-		log("gated destroy")
-	end)
-	:compile()
-
-local cleanupBuilder: Pulse.Builder<CleanupStepId> = Pulse.builder()
-local cleanupSequence = cleanupBuilder
-	:duration(0.7)
-	:cleanupDelay(1.75)
-	:seekMode("procedural" :: "procedural")
-	:param("scale", 1)
-	:step("burst", 0, function(_ctx: Pulse.CallbackContext)
-		log("cleanup step burst")
-	end)
-	:step("done", 0.7, function(_ctx: Pulse.CallbackContext)
-		log("cleanup step done")
-	end)
-	:event(0, "burst", function(_ctx: Pulse.CallbackContext)
-		log("cleanup event burst")
-	end)
-	:event(0.7, "done", function(_ctx: Pulse.CallbackContext)
-		log("cleanup completed timeline; linger begins")
-	end)
-	:update("cleanupAtom", function(ctx: Pulse.CallbackContext, _dt: number, timePosition: number)
-		local scale = (ctx:getParam("scale") :: number?) or 1
-		local alpha = math.clamp(timePosition / 0.7, 0, 1)
-		updateAtom(timePosition * 2.2, scale + alpha * 0.45, 1 - alpha * 0.25)
-	end)
-	:onPlay(function(ctx: Pulse.CallbackContext)
-		setAtomVisible(true)
-		ctx:addCleanup(function()
-			setAtomVisible(false)
-			log("cleanup delayed cleanup fired")
-		end)
-		log("cleanup play")
-	end)
-	:onStop(function(_ctx: Pulse.CallbackContext, reason)
-		log(`cleanup stop {tostring(reason)}`)
-	end)
-	:onCancel(function(_ctx: Pulse.CallbackContext, reason)
-		setAtomVisible(false)
-		log(`cleanup cancel {tostring(reason)}`)
-	end)
-	:onDestroy(function()
-		setAtomVisible(false)
-		log("cleanup destroy")
-	end)
-	:compile()
-updateAtom(0, 1, 0)
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PulseDevControls"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = player:WaitForChild("PlayerGui")
-
-local panel = Instance.new("Frame")
-panel.Name = "Panel"
-panel.AnchorPoint = Vector2.new(0, 0)
-panel.Position = UDim2.fromOffset(16, 16)
-panel.Size = UDim2.fromOffset(360, 352)
-panel.BackgroundColor3 = Color3.fromRGB(18, 20, 25)
-panel.BackgroundTransparency = 0.08
-panel.BorderSizePixel = 0
-panel.Parent = screenGui
-
-local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(12, 8)
-title.Size = UDim2.fromOffset(336, 24)
-title.Font = Enum.Font.Code
-title.Text = "Pulse Dev"
-title.TextColor3 = Color3.fromRGB(245, 245, 245)
-title.TextSize = 18
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = panel
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Name = "Status"
-statusLabel.BackgroundTransparency = 1
-statusLabel.Position = UDim2.fromOffset(12, 36)
-statusLabel.Size = UDim2.fromOffset(336, 54)
-statusLabel.Font = Enum.Font.Code
-statusLabel.TextColor3 = Color3.fromRGB(205, 225, 255)
-statusLabel.TextSize = 14
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.TextYAlignment = Enum.TextYAlignment.Top
-statusLabel.Parent = panel
-
-local logLabel = Instance.new("TextLabel")
-logLabel.Name = "Log"
-logLabel.BackgroundTransparency = 1
-logLabel.Position = UDim2.fromOffset(12, 232)
-logLabel.Size = UDim2.fromOffset(336, 108)
-logLabel.Font = Enum.Font.Code
-logLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-logLabel.TextSize = 12
-logLabel.TextXAlignment = Enum.TextXAlignment.Left
-logLabel.TextYAlignment = Enum.TextYAlignment.Top
-logLabel.TextWrapped = false
-logLabel.Parent = panel
-
-local function makeButton(text: string, column: number, row: number, callback: () -> ())
-	local button = Instance.new("TextButton")
-	button.Name = text:gsub("%W", "")
-	button.Position = UDim2.fromOffset(12 + column * 116, 96 + row * 34)
-	button.Size = UDim2.fromOffset(108, 28)
-	button.BackgroundColor3 = Color3.fromRGB(42, 48, 60)
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.Code
-	button.Text = text
-	button.TextColor3 = Color3.fromRGB(245, 245, 245)
-	button.TextSize = 13
-	button.Parent = panel
-	button.Activated:Connect(callback)
-
-	return button
+local function runEvent(label: string, marker: string, direction: EventDirection)
+	eventCount += 1
+	local currentStage = stage
+	if currentStage ~= nil then
+		currentStage:flash(direction)
+	end
+	local arrow = if direction == "forward" then "→" else "←"
+	record(`{arrow} {label} / {marker}`, direction)
 end
 
-local function destroyActive()
-	if activePlayback and activePlayback:isAlive() then
-		activePlayback:destroy()
+local function createScenarioSequence(label: string, policy: AddressPolicy, looping: boolean): Sequence
+	return Pulse.builder()
+		:duration(6)
+		:loop(looping)
+		:addressPolicy(policy)
+		:onPlay(function(playback: PlaybackContext)
+			record(`{label}: generation began`, "neutral")
+			playback:addCleanup(function()
+				record(`{label}: generation cleanup`, "neutral")
+			end)
+		end)
+		:event({
+			time = 0.8,
+			run = function()
+				runEvent(label, "ignite @ 0.8", "forward")
+			end,
+			reverse = function()
+				runEvent(label, "undo ignite @ 0.8", "reverse")
+			end,
+		})
+		:event({
+			time = 2.4,
+			run = function()
+				runEvent(label, "pulse @ 2.4", "forward")
+			end,
+			reverse = function()
+				runEvent(label, "undo pulse @ 2.4", "reverse")
+			end,
+		})
+		:event({
+			time = 4.6,
+			run = function()
+				runEvent(label, "release @ 4.6", "forward")
+			end,
+			reverse = function()
+				runEvent(label, "undo release @ 4.6", "reverse")
+			end,
+		})
+		:update({
+			startTime = 0,
+			endTime = 6,
+			run = function(_playback: PlaybackContext, _timelineDt: number, _timePosition: number)
+				updateCount += 1
+			end,
+		})
+		:onLoop(function(_playback: PlaybackContext, change: Pulse.LoopChange)
+			local direction: EventDirection = if change.direction == "forward" then "forward" else "reverse"
+			record(`{label}: loop {change.fromLoopIndex} → {change.toLoopIndex} ({change.direction})`, direction)
+		end)
+		:compile()
+end
+
+local scenarios: { [ScenarioKey]: Scenario } = {
+	rebuild = {
+		key = "rebuild",
+		label = "Rebuild",
+		policy = "rebuild",
+		looping = false,
+		sequence = createScenarioSequence("Rebuild", "rebuild", false),
+	},
+	skip = {
+		key = "skip",
+		label = "Skip",
+		policy = "skip",
+		looping = false,
+		sequence = createScenarioSequence("Skip", "skip", false),
+	},
+	cancel = {
+		key = "cancel",
+		label = "Cancel",
+		policy = "cancel",
+		looping = false,
+		sequence = createScenarioSequence("Cancel", "cancel", false),
+	},
+	loop = {
+		key = "loop",
+		label = "Loop",
+		policy = "rebuild",
+		looping = true,
+		sequence = createScenarioSequence("Loop", "rebuild", true),
+	},
+}
+
+local function getActive(): (Playback?, Scenario?)
+	return activePlayback, activeScenario
+end
+
+local function startScenario(key: ScenarioKey)
+	local previous = activePlayback
+	if previous ~= nil and previous:isAlive() then
+		previous:destroy()
 	end
 
-	activePlayback = nil
-	activeName = "none"
-end
-
-local function setActive(playback: AnyPlayback, name: string)
+	local scenario = scenarios[key]
+	activeScenario = scenario
+	eventCount = 0
+	updateCount = 0
+	lastEvent = `${scenario.label} ready`
+	lastEventDirection = "neutral"
+	local initialPosition = if configuredSpeed < 0 and not scenario.looping then scenario.sequence:getDuration() else 0
+	local playback = Pulse.playback(scenario.sequence, adapter, {
+		playbackSpeed = configuredSpeed,
+		position = {
+			timePosition = initialPosition,
+		},
+	})
 	activePlayback = playback
-	activeName = name
-	activeScale = ((playback:getParam("scale") :: number?) or 1)
-end
-
-local function playLoop()
-	destroyActive()
-
-	local playback = runtime:play(loopSequence, {
-		params = {
-			scale = activeScale,
-		},
-	})
-
-	setActive(playback :: any, "loop")
-	playback:onLooped(function(loopCount)
-		log(`loop callback {loopCount}`)
+	playback:onLooped(function(change)
+		record(
+			`observer: loop {change.fromLoopIndex} → {change.toLoopIndex} ({change.direction})`,
+			if change.direction == "forward" then "forward" else "reverse"
+		)
 	end)
-end
-
-local function playGated()
-	destroyActive()
-
-	local playback = runtime:play(gatedSequence, {
-		params = {
-			scale = activeScale,
-		},
-	})
-
-	setActive(playback :: any, "gated")
 	playback:onEnded(function(completion)
-		log(`gated ended {completion.status}/{completion.reason}`)
+		record(`completion: {completion.status} / {completion.reason or "no reason"}`, "neutral")
 	end)
+	playback:play()
+	record(`started {scenario.label} policy at {string.format("%+.2f", configuredSpeed)}×`, "neutral")
 end
 
-local function playCleanup()
-	destroyActive()
-
-	local playback = runtime:play(cleanupSequence, {
-		params = {
-			scale = activeScale,
-		},
-	})
-
-	setActive(playback :: any, "cleanup")
-	playback:onEnded(function(completion)
-		log(`cleanup ended {completion.status}/{completion.reason}; atom should linger`)
-	end)
-end
-
-local function adjustSpeed(delta: number)
-	if not activePlayback then
-		return
-	end
-
-	local nextSpeed = math.clamp(activePlayback:getPlaybackSpeed() + delta, 0.1, 3)
-	activePlayback:setPlaybackSpeed(nextSpeed)
-	log(`speed {string.format("%.2f", nextSpeed)}`)
-end
-
-local function adjustScale(delta: number)
-	activeScale = math.clamp(activeScale + delta, 0.35, 2.5)
-
-	if activePlayback then
-		activePlayback:setParam("scale", activeScale)
-	end
-
-	log(`scale {string.format("%.2f", activeScale)}`)
-end
-
-local function proceed()
-	if activePlayback then
-		activePlayback:signal("proceed", "ui")
-	end
+local function restart()
+	local scenario = activeScenario
+	startScenario(if scenario == nil then "rebuild" else scenario.key)
 end
 
 local function togglePause()
-	if not activePlayback then
+	local playback = activePlayback
+	if playback == nil or not playback:isAlive() then
+		record("pause ignored: no live playback", "neutral")
 		return
 	end
-
-	if activePlayback:isPaused() then
-		activePlayback:resume()
-		log("manual resume")
-	else
-		activePlayback:pause()
-		log("manual pause")
+	if playback:getStatus() == "paused" then
+		playback:resume()
+		record("resumed playback", "neutral")
+	elseif playback:getStatus() == "playing" then
+		playback:pause()
+		record("paused playback", "neutral")
 	end
 end
 
-local function seekHalf()
-	if activePlayback then
-		activePlayback:seek({
-			timePosition = 0.5,
-			replay = true,
-		})
+local function setSpeed(speed: number)
+	configuredSpeed = speed
+	local playback = activePlayback
+	if playback ~= nil and playback:isAlive() then
+		playback:setPlaybackSpeed(speed)
 	end
+	record(`playback speed {string.format("%+.2f", speed)}×`, "neutral")
+end
+
+local function adjustSpeed(delta: number)
+	local playback = activePlayback
+	local current = if playback ~= nil then playback:getPlaybackSpeed() else configuredSpeed
+	local sign = if current < 0 then -1 else 1
+	local magnitude = math.clamp(math.abs(current) + delta, 0.25, 3)
+	setSpeed(sign * magnitude)
+end
+
+local function toggleReverse()
+	local playback = activePlayback
+	local current = if playback ~= nil then playback:getPlaybackSpeed() else configuredSpeed
+	setSpeed(if current == 0 then -1 else -current)
+end
+
+local function seekTo(timePosition: number, loopOffset: number?)
+	local playback, scenario = getActive()
+	if playback == nil or scenario == nil or not playback:isAlive() then
+		record("seek ignored: no live playback", "neutral")
+		return
+	end
+	local current = playback:getPosition()
+	local address: Pulse.SequenceAddress = {
+		timePosition = math.clamp(timePosition, 0, scenario.sequence:getDuration()),
+	}
+	if scenario.looping then
+		address.loopIndex = current.loopIndex + (loopOffset or 0)
+	end
+	local accepted = playback:seek(address)
+	record(
+		string.format(
+			"seek %s to %.2f%s",
+			if accepted then "accepted" else "rejected",
+			address.timePosition,
+			if address.loopIndex == nil then "" else ` / loop {address.loopIndex}`
+		),
+		"neutral"
+	)
+end
+
+local function seekFraction(fraction: number)
+	local scenario = activeScenario
+	if scenario ~= nil then
+		seekTo(scenario.sequence:getDuration() * fraction)
+	end
+end
+
+local function seekRelative(delta: number)
+	local playback = activePlayback
+	if playback ~= nil then
+		seekTo(playback:getPosition().timePosition + delta)
+	end
+end
+
+local function nextLoop()
+	local playback, scenario = getActive()
+	if playback == nil or scenario == nil or not scenario.looping then
+		record("loop +1 is available in the Loop scenario", "neutral")
+		return
+	end
+	seekTo(playback:getPosition().timePosition, 1)
+end
+
+local function jumpClock(delta: number)
+	clock:jumpBy(delta)
+	record(`provider discontinuity {string.format("%+.1f", delta)}s`, "neutral")
 end
 
 local function cancelActive()
-	if activePlayback then
-		activePlayback:cancel("manualCancel")
+	local playback = activePlayback
+	if playback ~= nil and playback:isAlive() then
+		playback:cancel("manualHarnessCancel")
+	else
+		record("cancel ignored: no live playback", "neutral")
 	end
 end
 
-makeButton("Loop", 0, 0, playLoop)
-makeButton("Gated", 1, 0, playGated)
-makeButton("Cancel", 2, 0, cancelActive)
-makeButton("Speed -", 0, 1, function()
-	adjustSpeed(-0.25)
-end)
-makeButton("Speed +", 1, 1, function()
-	adjustSpeed(0.25)
-end)
-makeButton("Pause", 2, 1, togglePause)
-makeButton("Scale -", 0, 2, function()
-	adjustScale(-0.15)
-end)
-makeButton("Scale +", 1, 2, function()
-	adjustScale(0.15)
-end)
-makeButton("Seek .5", 2, 2, seekHalf)
-makeButton("Proceed", 0, 3, proceed)
-makeButton("Cleanup", 1, 3, playCleanup)
+local callbacks: HarnessUi.Callbacks = {
+	selectRebuild = function()
+		startScenario("rebuild")
+	end,
+	selectSkip = function()
+		startScenario("skip")
+	end,
+	selectCancel = function()
+		startScenario("cancel")
+	end,
+	selectLoop = function()
+		startScenario("loop")
+	end,
+	restart = restart,
+	togglePause = togglePause,
+	toggleReverse = toggleReverse,
+	slower = function()
+		adjustSpeed(-0.25)
+	end,
+	faster = function()
+		adjustSpeed(0.25)
+	end,
+	cancel = cancelActive,
+	seekStart = function()
+		seekFraction(0)
+	end,
+	seekMiddle = function()
+		seekFraction(0.5)
+	end,
+	seekEnd = function()
+		seekFraction(1)
+	end,
+	seekBackward = function()
+		seekRelative(-1)
+	end,
+	seekForward = function()
+		seekRelative(1)
+	end,
+	clockBackward = function()
+		jumpClock(-1.5)
+	end,
+	clockForward = function()
+		jumpClock(1.5)
+	end,
+	nextLoop = nextLoop,
+}
 
-local function bindKey(name: string, keyCode: Enum.KeyCode, callback: () -> ())
-	ContextActionService:BindAction(name, function(_, state)
-		if state == Enum.UserInputState.Begin then
-			callback()
-		end
+local controller = HarnessUi.new(player:WaitForChild("PlayerGui") :: PlayerGui, callbacks)
+ui = controller
+controller:setLogs(logLines)
+local stageController = AtomStage.new()
+stage = stageController
 
-		return Enum.ContextActionResult.Sink
-	end, false, keyCode)
+local heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime)
+	clock:step(deltaTime)
+end)
+
+local renderConnection = RunService.RenderStepped:Connect(function(deltaTime)
+	local playback, scenario = getActive()
+	if playback == nil or scenario == nil then
+		return
+	end
+	local position = playback:getPosition()
+	local diagnostics = clock:getDiagnostics()
+	stageController:update({
+		scenarioKey = scenario.key,
+		status = playback:getStatus(),
+		timePosition = position.timePosition,
+		duration = scenario.sequence:getDuration(),
+		loopIndex = position.loopIndex,
+		playbackSpeed = playback:getPlaybackSpeed(),
+	}, deltaTime)
+	controller:update({
+		scenarioKey = scenario.key,
+		scenarioLabel = scenario.label,
+		policy = scenario.policy,
+		status = playback:getStatus(),
+		position = position.timePosition,
+		duration = scenario.sequence:getDuration(),
+		loopIndex = position.loopIndex,
+		playbackSpeed = playback:getPlaybackSpeed(),
+		clockTime = clock:read().timePosition,
+		reachedTasks = diagnostics.reachedTasks,
+		changedBindings = diagnostics.changedBindings,
+		phaseBindings = diagnostics.phaseBindings,
+		eventCount = eventCount,
+		updateCount = updateCount,
+		lastEvent = lastEvent,
+		lastEventDirection = lastEventDirection,
+	})
+end)
+
+local inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then
+		return
+	end
+	local keyCode = input.KeyCode
+	if keyCode == Enum.KeyCode.One then
+		startScenario("rebuild")
+	elseif keyCode == Enum.KeyCode.Two then
+		startScenario("skip")
+	elseif keyCode == Enum.KeyCode.Three then
+		startScenario("cancel")
+	elseif keyCode == Enum.KeyCode.Four then
+		startScenario("loop")
+	elseif keyCode == Enum.KeyCode.Space then
+		togglePause()
+	elseif keyCode == Enum.KeyCode.R then
+		toggleReverse()
+	elseif keyCode == Enum.KeyCode.Minus then
+		adjustSpeed(-0.25)
+	elseif keyCode == Enum.KeyCode.Equals then
+		adjustSpeed(0.25)
+	elseif keyCode == Enum.KeyCode.Backspace then
+		cancelActive()
+	end
+end)
+
+local cleanedUp = false
+local function cleanup()
+	if cleanedUp then
+		return
+	end
+	cleanedUp = true
+	heartbeatConnection:Disconnect()
+	renderConnection:Disconnect()
+	inputConnection:Disconnect()
+
+	local playback = activePlayback
+	activePlayback = nil
+	if playback ~= nil and playback:isAlive() then
+		playback:destroy()
+	end
+	adapter:destroy()
+	clock:destroy()
+	controller:destroy()
+	stageController:destroy()
+	stage = nil
+	ui = nil
 end
 
-bindKey("PulseDevLoop", Enum.KeyCode.One, playLoop)
-bindKey("PulseDevGated", Enum.KeyCode.Two, playGated)
-bindKey("PulseDevSpeedDown", Enum.KeyCode.Three, function()
-	adjustSpeed(-0.25)
-end)
-bindKey("PulseDevSpeedUp", Enum.KeyCode.Four, function()
-	adjustSpeed(0.25)
-end)
-bindKey("PulseDevScaleDown", Enum.KeyCode.Five, function()
-	adjustScale(-0.15)
-end)
-bindKey("PulseDevScaleUp", Enum.KeyCode.Six, function()
-	adjustScale(0.15)
-end)
-bindKey("PulseDevProceed", Enum.KeyCode.Seven, proceed)
-bindKey("PulseDevPause", Enum.KeyCode.Eight, togglePause)
-bindKey("PulseDevCancel", Enum.KeyCode.Nine, cancelActive)
-bindKey("PulseDevCleanup", Enum.KeyCode.Zero, playCleanup)
+script.Destroying:Connect(cleanup)
 
-RunService.RenderStepped:Connect(function()
-	local status = if activePlayback then activePlayback:getStatus() else "none"
-	local speed = if activePlayback then activePlayback:getPlaybackSpeed() else 0
-	local timePosition = if activePlayback then activePlayback:getTimePosition() else 0
-	local step = if activePlayback then tostring(activePlayback:getStep()) else "nil"
-
-	statusLabel.Text = string.format(
-		"mode: %s  status: %s\nspeed: %.2f  scale: %.2f  time: %.2f\nstep: %s",
-		activeName,
-		status,
-		speed,
-		activeScale,
-		timePosition,
-		step
-	)
-
-	logLabel.Text = table.concat(logLines, "\n")
-end)
-
-setAtomVisible(true)
-playLoop()
-log("keys: 1 loop, 2 gated, 0 cleanup, 3/4 speed, 5/6 scale, 7 proceed, 8 pause, 9 cancel")
+startScenario("rebuild")
+record("ready: traverse events, seek, jump the provider, loop, reverse, and cancel", "neutral")
