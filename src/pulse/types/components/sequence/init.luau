@@ -60,6 +60,8 @@ export type Sequence = {
 	getAddressPolicy: (self: Sequence) -> AddressPolicy,
 }
 
+export type SequenceConstructor = (definition: SequenceDefinition) -> Sequence
+
 export type SequenceImpl = Sequence & {
 	_duration: number,
 	_loop: boolean,
@@ -83,6 +85,7 @@ export type Builder = {
 }
 
 export type BuilderImpl = Builder & {
+	_constructSequence: SequenceConstructor,
 	_duration: number?,
 	_loop: boolean,
 	_addressPolicy: AddressPolicy,

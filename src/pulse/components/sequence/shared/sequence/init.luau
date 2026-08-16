@@ -4,10 +4,10 @@
 
 local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
+local Builder = require(script.builder)
 
 type AddressPolicy = DefTypes.AddressPolicy
 type Builder = Types.Builder
-type BuilderImpl = Types.BuilderImpl
 type CompiledEvent = Types.CompiledEvent
 type CompiledUpdate = Types.CompiledUpdate
 type Event = Types.Event
@@ -24,7 +24,7 @@ type TraversalDirection = DefTypes.TraversalDirection
 type Update = Types.Update
 
 type SequenceModule = {
-	compile: (definition: SequenceDefinition) -> Sequence,
+	new: (definition: SequenceDefinition) -> Sequence,
 	builder: () -> Builder,
 	_validateAddress: (sequence: Sequence, address: SequenceAddress) -> PlaybackPosition,
 	_positionAt: (sequence: Sequence, unwrappedTimePosition: number) -> PlaybackPosition,
@@ -42,11 +42,8 @@ type SequenceModule = {
 }
 
 local MAX_EXACT_INTEGER = 9_007_199_254_740_991
-local SequenceMethods = {}
-SequenceMethods.__index = SequenceMethods
-
-local BuilderMethods = {}
-BuilderMethods.__index = BuilderMethods
+local Sequence = {}
+Sequence.__index = Sequence
 
 local function isFinite(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
@@ -218,9 +215,7 @@ local function compileBoundaries(duration: number, events: { CompiledEvent }, up
 	return table.freeze(boundaries)
 end
 
-local Sequence = {}
-
-function Sequence.compile(definition: SequenceDefinition): Sequence
+local function ConstructSequence(definition: SequenceDefinition): Sequence
 	assertFinite(definition.duration, "duration")
 	assert(definition.duration > 0, "Pulse duration must be greater than zero")
 	assert(definition.onPlay == nil or type(definition.onPlay) == "function", "Pulse onPlay must be a callback")
@@ -238,24 +233,24 @@ function Sequence.compile(definition: SequenceDefinition): Sequence
 			_boundaries = compileBoundaries(definition.duration, events, updates),
 			_onPlay = definition.onPlay,
 			_onLoop = definition.onLoop,
-		}, SequenceMethods) :: unknown
+		}, Sequence) :: unknown
 	) :: SequenceImpl
 	return table.freeze(self)
 end
 
-function SequenceMethods.getDuration(self: SequenceImpl): number
+function Sequence.getDuration(self: SequenceImpl): number
 	return self._duration
 end
 
-function SequenceMethods.isLooping(self: SequenceImpl): boolean
+function Sequence.isLooping(self: SequenceImpl): boolean
 	return self._loop
 end
 
-function SequenceMethods.getAddressPolicy(self: SequenceImpl): AddressPolicy
+function Sequence.getAddressPolicy(self: SequenceImpl): AddressPolicy
 	return self._addressPolicy
 end
 
-function Sequence._positionAt(sequence: Sequence, unwrappedTimePosition: number): PlaybackPosition
+local function positionAt(sequence: Sequence, unwrappedTimePosition: number): PlaybackPosition
 	local self = asSequenceImpl(sequence)
 	assertFinite(unwrappedTimePosition, "unwrapped playback position")
 	if not self._loop then
@@ -285,7 +280,7 @@ function Sequence._positionAt(sequence: Sequence, unwrappedTimePosition: number)
 	}
 end
 
-function Sequence._validateAddress(sequence: Sequence, address: SequenceAddress): PlaybackPosition
+local function validateAddress(sequence: Sequence, address: SequenceAddress): PlaybackPosition
 	local self = asSequenceImpl(sequence)
 	assertFinite(address.timePosition, "address timePosition")
 	assert(
@@ -358,7 +353,7 @@ local function composeBoundary(self: SequenceImpl, loopIndex: number, boundaryIn
 	}
 end
 
-function Sequence._nextBoundary(
+local function nextBoundary(
 	sequence: Sequence,
 	position: PlaybackPosition,
 	direction: TraversalDirection
@@ -404,7 +399,7 @@ function Sequence._nextBoundary(
 	return composeBoundary(self, loopIndex - 1, previousIndex)
 end
 
-function Sequence._boundaryAt(sequence: Sequence, position: PlaybackPosition): SequenceBoundary?
+local function boundaryAt(sequence: Sequence, position: PlaybackPosition): SequenceBoundary?
 	local self = asSequenceImpl(sequence)
 	if
 		not isFinite(position.timePosition)
@@ -428,115 +423,47 @@ function Sequence._boundaryAt(sequence: Sequence, position: PlaybackPosition): S
 	}
 end
 
-function Sequence._eventRangeAt(sequence: Sequence, localTimePosition: number): (number, number)
+local function eventRangeAt(sequence: Sequence, localTimePosition: number): (number, number)
 	local events = asSequenceImpl(sequence)._events
 	local first = eventFirstAtOrAfter(events, localTimePosition)
 	local after = eventFirstAfter(events, localTimePosition)
 	return first, after - 1
 end
 
-function Sequence._getEvent(sequence: Sequence, index: number): CompiledEvent
+local function getEvent(sequence: Sequence, index: number): CompiledEvent
 	local event = asSequenceImpl(sequence)._events[index]
 	assert(event ~= nil, "Pulse event index is out of bounds")
 	return event
 end
 
-function Sequence._getUpdates(sequence: Sequence): { CompiledUpdate }
+local function getUpdates(sequence: Sequence): { CompiledUpdate }
 	return asSequenceImpl(sequence)._updates
 end
 
-function Sequence._getOnPlay(sequence: Sequence): EventCallback?
+local function getOnPlay(sequence: Sequence): EventCallback?
 	return asSequenceImpl(sequence)._onPlay
 end
 
-function Sequence._getOnLoop(sequence: Sequence): ((PlaybackContext, LoopChange) -> ())?
+local function getOnLoop(sequence: Sequence): ((PlaybackContext, LoopChange) -> ())?
 	return asSequenceImpl(sequence)._onLoop
 end
 
-function Sequence.builder(): Builder
-	local self: BuilderImpl = (
-		setmetatable({
-			_duration = nil,
-			_loop = false,
-			_addressPolicy = "skip" :: AddressPolicy,
-			_events = {},
-			_updates = {},
-			_onPlay = nil,
-			_onLoop = nil,
-		}, BuilderMethods) :: unknown
-	) :: BuilderImpl
-	return self
-end
-
-function BuilderMethods.duration(self: BuilderImpl, seconds: number): Builder
-	self._duration = seconds
-	return self
-end
-
-function BuilderMethods.loop(self: BuilderImpl, enabled: boolean?): Builder
-	self._loop = if enabled == nil then true else enabled
-	return self
-end
-
-function BuilderMethods.addressPolicy(self: BuilderImpl, policy: AddressPolicy): Builder
-	self._addressPolicy = policy
-	return self
-end
-
-function BuilderMethods.event(self: BuilderImpl, event: Event): Builder
-	table.insert(self._events, {
-		time = event.time,
-		run = event.run,
-		reverse = event.reverse,
-	})
-	return self
-end
-
-function BuilderMethods.update(self: BuilderImpl, update: Update): Builder
-	table.insert(self._updates, {
-		startTime = update.startTime,
-		endTime = update.endTime,
-		run = update.run,
-	})
-	return self
-end
-
-function BuilderMethods.onPlay(self: BuilderImpl, callback: EventCallback): Builder
-	self._onPlay = callback
-	return self
-end
-
-function BuilderMethods.onLoop(self: BuilderImpl, callback: (PlaybackContext, LoopChange) -> ()): Builder
-	self._onLoop = callback
-	return self
-end
-
-function BuilderMethods.compile(self: BuilderImpl): Sequence
-	local duration = self._duration
-	assert(duration ~= nil, "Pulse Builder requires duration before compile")
-	return Sequence.compile({
-		duration = duration,
-		loop = self._loop,
-		addressPolicy = self._addressPolicy,
-		events = self._events,
-		updates = self._updates,
-		onPlay = self._onPlay,
-		onLoop = self._onLoop,
-	})
+local function ConstructBuilder(): Builder
+	return Builder.new(ConstructSequence)
 end
 
 local module: SequenceModule = {
-	compile = Sequence.compile,
-	builder = Sequence.builder,
-	_validateAddress = Sequence._validateAddress,
-	_positionAt = Sequence._positionAt,
-	_nextBoundary = Sequence._nextBoundary,
-	_boundaryAt = Sequence._boundaryAt,
-	_eventRangeAt = Sequence._eventRangeAt,
-	_getEvent = Sequence._getEvent,
-	_getUpdates = Sequence._getUpdates,
-	_getOnPlay = Sequence._getOnPlay,
-	_getOnLoop = Sequence._getOnLoop,
+	new = ConstructSequence,
+	builder = ConstructBuilder,
+	_validateAddress = validateAddress,
+	_positionAt = positionAt,
+	_nextBoundary = nextBoundary,
+	_boundaryAt = boundaryAt,
+	_eventRangeAt = eventRangeAt,
+	_getEvent = getEvent,
+	_getUpdates = getUpdates,
+	_getOnPlay = getOnPlay,
+	_getOnLoop = getOnLoop,
 }
 
 return module

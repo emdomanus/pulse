@@ -43,8 +43,8 @@ local MAX_RECONCILIATION_WORK = 4_096
 local DEADLINE_ABSOLUTE_EPSILON = 1e-9
 local DEADLINE_RELATIVE_EPSILON = 4.440892098500626e-16
 
-local PlaybackMethods = {}
-PlaybackMethods.__index = PlaybackMethods
+local Playback = {}
+Playback.__index = Playback
 
 -- Primitive and direction helpers
 
@@ -1063,9 +1063,7 @@ end
 
 -- Construction and public methods
 
-local PlaybackModuleTable = {}
-
-function PlaybackModuleTable.new(
+local function ConstructPlayback(
 	sequence: SequenceType,
 	adapter: TemporalAdapterType,
 	options: PlaybackOptions?
@@ -1116,12 +1114,12 @@ function PlaybackModuleTable.new(
 			_reachedCallback = reachedCallback,
 			_workCount = 0,
 			_appliedClockSerial = 0,
-		}, PlaybackMethods) :: unknown
+		}, Playback) :: unknown
 	) :: PlaybackImpl
 	return self
 end
 
-function PlaybackMethods.play(self: PlaybackImpl): Playback
+function Playback.play(self: PlaybackImpl): Playback
 	if self._status ~= "idle" or self._finishing then
 		return self
 	end
@@ -1160,7 +1158,7 @@ function PlaybackMethods.play(self: PlaybackImpl): Playback
 	return self
 end
 
-function PlaybackMethods.pause(self: PlaybackImpl)
+function Playback.pause(self: PlaybackImpl)
 	if self._status ~= "playing" or self._finishing or self._terminalRequest ~= nil then
 		return
 	end
@@ -1174,7 +1172,7 @@ function PlaybackMethods.pause(self: PlaybackImpl)
 	end
 end
 
-function PlaybackMethods.resume(self: PlaybackImpl)
+function Playback.resume(self: PlaybackImpl)
 	if self._status ~= "paused" or self._finishing or self._terminalRequest ~= nil then
 		return
 	end
@@ -1188,7 +1186,7 @@ function PlaybackMethods.resume(self: PlaybackImpl)
 	end
 end
 
-function PlaybackMethods.setPlaybackSpeed(self: PlaybackImpl, speed: number)
+function Playback.setPlaybackSpeed(self: PlaybackImpl, speed: number)
 	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
 	if
 		(self._status == "playing" or self._status == "paused")
@@ -1207,11 +1205,11 @@ function PlaybackMethods.setPlaybackSpeed(self: PlaybackImpl, speed: number)
 	end
 end
 
-function PlaybackMethods.getPlaybackSpeed(self: PlaybackImpl): number
+function Playback.getPlaybackSpeed(self: PlaybackImpl): number
 	return self._playbackSpeed
 end
 
-function PlaybackMethods.seek(self: PlaybackImpl, address: SequenceAddress): boolean
+function Playback.seek(self: PlaybackImpl, address: SequenceAddress): boolean
 	local validated = Sequence._validateAddress(self._sequence, address)
 	if self._status == "idle" or self._completion ~= nil or self._finishing or self._terminalRequest ~= nil then
 		return false
@@ -1232,7 +1230,7 @@ function PlaybackMethods.seek(self: PlaybackImpl, address: SequenceAddress): boo
 	return true
 end
 
-function PlaybackMethods.getPosition(self: PlaybackImpl): PlaybackPosition
+function Playback.getPosition(self: PlaybackImpl): PlaybackPosition
 	if self._status == "playing" and not self._busy and not self._finishing then
 		local sample, clockSerial = TemporalAdapter._snapshot(self._adapter)
 		if sample == nil then
@@ -1256,11 +1254,11 @@ function PlaybackMethods.getPosition(self: PlaybackImpl): PlaybackPosition
 	return publicPosition(self._position)
 end
 
-function PlaybackMethods.getStatus(self: PlaybackImpl): Status
+function Playback.getStatus(self: PlaybackImpl): Status
 	return self._status
 end
 
-function PlaybackMethods.addCleanup(self: PlaybackImpl, cleanup: () -> ())
+function Playback.addCleanup(self: PlaybackImpl, cleanup: () -> ())
 	assert(type(cleanup) == "function", "Pulse cleanup must be a callback")
 	if self._completion ~= nil then
 		if self._finishing then
@@ -1274,11 +1272,11 @@ function PlaybackMethods.addCleanup(self: PlaybackImpl, cleanup: () -> ())
 	table.insert(self._cleanup, cleanup)
 end
 
-function PlaybackMethods.cancel(self: PlaybackImpl, reason: string?)
+function Playback.cancel(self: PlaybackImpl, reason: string?)
 	requestTerminal(self, "cancelled", reason)
 end
 
-function PlaybackMethods.destroy(self: PlaybackImpl)
+function Playback.destroy(self: PlaybackImpl)
 	if self._completion ~= nil then
 		self._endedBindings = {}
 		self._loopedBindings = {}
@@ -1287,7 +1285,7 @@ function PlaybackMethods.destroy(self: PlaybackImpl)
 	requestTerminal(self, "destroyed", nil)
 end
 
-function PlaybackMethods.onEnded(self: PlaybackImpl, callback: EndedCallback): () -> ()
+function Playback.onEnded(self: PlaybackImpl, callback: EndedCallback): () -> ()
 	local completion = self._completion
 	if completion ~= nil then
 		if self._deliveringEnded then
@@ -1318,7 +1316,7 @@ function PlaybackMethods.onEnded(self: PlaybackImpl, callback: EndedCallback): (
 	end
 end
 
-function PlaybackMethods.onLooped(self: PlaybackImpl, callback: LoopedCallback): () -> ()
+function Playback.onLooped(self: PlaybackImpl, callback: LoopedCallback): () -> ()
 	if self._completion ~= nil or self._finishing then
 		return noopRelease
 	end
@@ -1342,15 +1340,15 @@ function PlaybackMethods.onLooped(self: PlaybackImpl, callback: LoopedCallback):
 	end
 end
 
-function PlaybackMethods.isAlive(self: PlaybackImpl): boolean
+function Playback.isAlive(self: PlaybackImpl): boolean
 	return self._completion == nil
 end
 
-function PlaybackMethods.getCompletion(self: PlaybackImpl): Completion?
+function Playback.getCompletion(self: PlaybackImpl): Completion?
 	return self._completion
 end
 
-function PlaybackMethods._onAdapterClockChanged(
+function Playback._onAdapterClockChanged(
 	self: PlaybackImpl,
 	change: ClockChange,
 	sample: ClockSample,
@@ -1364,7 +1362,7 @@ function PlaybackMethods._onAdapterClockChanged(
 	})
 end
 
-function PlaybackMethods._onAdapterPhase(self: PlaybackImpl, sample: ClockSample, clockSerial: number)
+function Playback._onAdapterPhase(self: PlaybackImpl, sample: ClockSample, clockSerial: number)
 	enqueue(self, {
 		kind = "phase",
 		sample = sample,
@@ -1372,12 +1370,12 @@ function PlaybackMethods._onAdapterPhase(self: PlaybackImpl, sample: ClockSample
 	})
 end
 
-function PlaybackMethods._onAdapterDestroyed(self: PlaybackImpl, reason: string)
+function Playback._onAdapterDestroyed(self: PlaybackImpl, reason: string)
 	requestTerminal(self, "failed", reason)
 end
 
 local module: PlaybackModule = {
-	new = PlaybackModuleTable.new,
+	new = ConstructPlayback,
 }
 
 return module

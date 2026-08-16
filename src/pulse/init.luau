@@ -36,7 +36,7 @@ export type TemporalAdapter = Types.TemporalAdapter
 local Pulse = {}
 
 function Pulse.sequence(definition: SequenceDefinition): Sequence
-	return Sequence.compile(definition)
+	return Sequence.new(definition)
 end
 
 function Pulse.builder(): Builder
