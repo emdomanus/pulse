@@ -2,51 +2,41 @@
 --!optimize 2
 --!native
 
+local DefTypes = require(script.Parent.Parent.def)
 local SequenceTypes = require(script.Parent.sequence)
-local TemporalAdapterTypes = require(script.Parent.temporalAdapter)
+local TemporalAdapterTypes = require(script.Parent.Parent.managers.temporalAdapter)
 
-export type Release = SequenceTypes.Release
-export type TraversalDirection = SequenceTypes.TraversalDirection
-export type AddressPolicy = SequenceTypes.AddressPolicy
-export type SequenceAddress = SequenceTypes.SequenceAddress
-export type PlaybackPosition = SequenceTypes.PlaybackPosition
-export type LoopChange = SequenceTypes.LoopChange
-export type ActiveStatus = SequenceTypes.ActiveStatus
-export type TerminalStatus = SequenceTypes.TerminalStatus
-export type Status = SequenceTypes.Status
-export type Completion = SequenceTypes.Completion
-export type PlaybackContext = SequenceTypes.PlaybackContext
-export type Sequence = SequenceTypes.Sequence
-export type TemporalAdapter = TemporalAdapterTypes.TemporalAdapter
-export type ClockSample = TemporalAdapterTypes.ClockSample
-export type ClockChange = TemporalAdapterTypes.ClockChange
-export type ScheduledTaskId = TemporalAdapterTypes.ScheduledTaskId
-export type ReachedCallback = TemporalAdapterTypes.ReachedCallback
+type ClockChange = TemporalAdapterTypes.ClockChange
+type ClockSample = TemporalAdapterTypes.ClockSample
+type Completion = DefTypes.Completion
+type LoopChange = DefTypes.LoopChange
+type PlaybackContext = DefTypes.PlaybackContext
+type PlaybackPosition = DefTypes.PlaybackPosition
+type ReachedCallback = TemporalAdapterTypes.ReachedCallback
+type Release = DefTypes.Release
+type ScheduledTaskId = TemporalAdapterTypes.ScheduledTaskId
+type Sequence = SequenceTypes.Sequence
+type SequenceAddress = DefTypes.SequenceAddress
+type Status = DefTypes.Status
+type TemporalAdapter = TemporalAdapterTypes.TemporalAdapter
+type TerminalStatus = DefTypes.TerminalStatus
+type TraversalDirection = DefTypes.TraversalDirection
 
 export type EndedCallback = (completion: Completion) -> ()
-export type LoopedCallback = (change: LoopChange) -> ()
-
-export type Playback = PlaybackContext & {
-	play: (self: Playback) -> Playback,
-	onEnded: (self: Playback, callback: EndedCallback) -> Release,
-	onLooped: (self: Playback, callback: LoopedCallback) -> Release,
-	isAlive: (self: Playback) -> boolean,
-	getCompletion: (self: Playback) -> Completion?,
-}
-
-export type PlaybackOptions = {
-	playbackSpeed: number?,
-	position: SequenceAddress?,
-}
-
 export type EndedBinding = {
 	callback: EndedCallback?,
 	active: boolean,
 }
 
+export type LoopedCallback = (change: LoopChange) -> ()
 export type LoopedBinding = {
 	callback: LoopedCallback?,
 	active: boolean,
+}
+
+export type PlaybackOptions = {
+	playbackSpeed: number?,
+	position: SequenceAddress?,
 }
 
 export type ClockChangeOperation = {
@@ -110,7 +100,15 @@ export type TerminalRequest = {
 
 export type BoundaryState = "before" | "after"
 
-export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackAttachment & {
+export type Playback = PlaybackContext & {
+	play: (self: Playback) -> Playback,
+	onEnded: (self: Playback, callback: EndedCallback) -> Release,
+	onLooped: (self: Playback, callback: LoopedCallback) -> Release,
+	isAlive: (self: Playback) -> boolean,
+	getCompletion: (self: Playback) -> Completion?,
+}
+
+export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackSink & {
 	_sequence: Sequence,
 	_adapter: TemporalAdapter,
 	_status: Status,

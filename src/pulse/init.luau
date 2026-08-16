@@ -3,9 +3,9 @@
 --!native
 
 local Types = require(script.types)
-local Sequence = require(script.sequence)
-local Playback = require(script.playback)
-local TemporalAdapter = require(script.temporalAdapter)
+local Sequence = require(script.components.sequence.shared.sequence)
+local Playback = require(script.components.playback.shared.playback)
+local TemporalAdapter = require(script.managers.temporalAdapter.shared.temporalAdapter)
 
 export type Release = Types.Release
 export type TraversalDirection = Types.TraversalDirection

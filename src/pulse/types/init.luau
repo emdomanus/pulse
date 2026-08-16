@@ -2,21 +2,22 @@
 --!optimize 2
 --!native
 
-local SequenceTypes = require(script.sequence)
-local PlaybackTypes = require(script.playback)
-local TemporalAdapterTypes = require(script.temporalAdapter)
+local DefTypes = require(script.def)
+local SequenceTypes = require(script.components.sequence)
+local PlaybackTypes = require(script.components.playback)
+local TemporalAdapterTypes = require(script.managers.temporalAdapter)
 
-export type Release = SequenceTypes.Release
-export type TraversalDirection = SequenceTypes.TraversalDirection
-export type AddressPolicy = SequenceTypes.AddressPolicy
-export type SequenceAddress = SequenceTypes.SequenceAddress
-export type PlaybackPosition = SequenceTypes.PlaybackPosition
-export type LoopChange = SequenceTypes.LoopChange
-export type ActiveStatus = SequenceTypes.ActiveStatus
-export type TerminalStatus = SequenceTypes.TerminalStatus
-export type Status = SequenceTypes.Status
-export type Completion = SequenceTypes.Completion
-export type PlaybackContext = SequenceTypes.PlaybackContext
+export type Release = DefTypes.Release
+export type TraversalDirection = DefTypes.TraversalDirection
+export type AddressPolicy = DefTypes.AddressPolicy
+export type SequenceAddress = DefTypes.SequenceAddress
+export type PlaybackPosition = DefTypes.PlaybackPosition
+export type LoopChange = DefTypes.LoopChange
+export type ActiveStatus = DefTypes.ActiveStatus
+export type TerminalStatus = DefTypes.TerminalStatus
+export type Status = DefTypes.Status
+export type Completion = DefTypes.Completion
+export type PlaybackContext = DefTypes.PlaybackContext
 export type Event = SequenceTypes.Event
 export type Update = SequenceTypes.Update
 export type SequenceDefinition = SequenceTypes.SequenceDefinition

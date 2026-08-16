@@ -2,33 +2,37 @@
 --!optimize 2
 --!native
 
-local Types = require(script.Parent.types.playback)
-local Sequence = require(script.Parent.sequence)
-local TemporalAdapter = require(script.Parent.temporalAdapter)
+local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
+local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.types.components.playback)
+local SequenceTypes = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
+local TemporalAdapterTypes = require(script.Parent.Parent.Parent.Parent.types.managers.temporalAdapter)
+local Sequence = require(script.Parent.Parent.Parent.sequence.shared.sequence)
+local TemporalAdapter = require(script.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 
-type AddressPolicy = Types.AddressPolicy
-type BoundaryState = Types.BoundaryState
-type ClockChange = Types.ClockChange
-type ClockSample = Types.ClockSample
-type Completion = Types.Completion
-type EndedBinding = Types.EndedBinding
-type EndedCallback = Types.EndedCallback
-type LoopChange = Types.LoopChange
-type LoopedBinding = Types.LoopedBinding
-type LoopedCallback = Types.LoopedCallback
-type Operation = Types.Operation
-type Playback = Types.Playback
-type PlaybackContext = Types.PlaybackContext
-type PlaybackImpl = Types.PlaybackImpl
-type PlaybackOptions = Types.PlaybackOptions
-type PlaybackPosition = Types.PlaybackPosition
-type SequenceAddress = Types.SequenceAddress
-type SequenceType = Types.Sequence
-type Status = Types.Status
-type TemporalAdapterType = Types.TemporalAdapter
-type TerminalRequest = Types.TerminalRequest
-type TerminalStatus = Types.TerminalStatus
-type TraversalDirection = "forward" | "backward"
+type AddressPolicy = DefTypes.AddressPolicy
+type BoundaryState = PlaybackTypes.BoundaryState
+type ClockChange = TemporalAdapterTypes.ClockChange
+type ClockSample = TemporalAdapterTypes.ClockSample
+type Completion = DefTypes.Completion
+type EndedBinding = PlaybackTypes.EndedBinding
+type EndedCallback = PlaybackTypes.EndedCallback
+type LoopChange = DefTypes.LoopChange
+type LoopedBinding = PlaybackTypes.LoopedBinding
+type LoopedCallback = PlaybackTypes.LoopedCallback
+type Operation = PlaybackTypes.Operation
+type Playback = PlaybackTypes.Playback
+type PlaybackContext = DefTypes.PlaybackContext
+type PlaybackImpl = PlaybackTypes.PlaybackImpl
+type PlaybackOptions = PlaybackTypes.PlaybackOptions
+type PlaybackPosition = DefTypes.PlaybackPosition
+type PlaybackSink = TemporalAdapterTypes.PlaybackSink
+type SequenceAddress = DefTypes.SequenceAddress
+type SequenceType = SequenceTypes.Sequence
+type Status = DefTypes.Status
+type TemporalAdapterType = TemporalAdapterTypes.TemporalAdapter
+type TerminalRequest = PlaybackTypes.TerminalRequest
+type TerminalStatus = DefTypes.TerminalStatus
+type TraversalDirection = DefTypes.TraversalDirection
 
 type PlaybackModule = {
 	new: (sequence: SequenceType, adapter: TemporalAdapterType, options: PlaybackOptions?) -> Playback,
@@ -41,11 +45,11 @@ local DEADLINE_RELATIVE_EPSILON = 4.440892098500626e-16
 local PlaybackMethods = {}
 PlaybackMethods.__index = PlaybackMethods
 
+-- Primitive and direction helpers
+
 local function noopRelease() end
 
-local drainOperations: (self: PlaybackImpl) -> ()
 local refreshOwnership: (self: PlaybackImpl, preserveTask: boolean) -> ()
-local finish: (self: PlaybackImpl, status: TerminalStatus, reason: string?) -> ()
 local runPhaseUpdates: (self: PlaybackImpl, fromPosition: number, toPosition: number) -> ()
 local reconcileSample: (self: PlaybackImpl, sample: ClockSample, preserveTask: boolean, refreshAfter: boolean?) -> ()
 
@@ -73,24 +77,11 @@ local function asAttachment(self: PlaybackImpl): PlaybackContext
 	return (self :: unknown) :: PlaybackContext
 end
 
-local function asAdapterAttachment(self: PlaybackImpl): PlaybackImpl
+local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
 	return self
 end
 
-local function requestTerminal(self: PlaybackImpl, status: TerminalStatus, reason: string?)
-	if self._completion ~= nil or self._terminalRequest ~= nil or self._finishing then
-		return
-	end
-	if self._busy then
-		self._terminalRequest = {
-			status = status,
-			reason = reason,
-		}
-		self._operations = {}
-		return
-	end
-	finish(self, status, reason)
-end
+-- Lifecycle and cleanup
 
 local function cancelScheduled(self: PlaybackImpl)
 	local id = self._scheduledId
@@ -105,7 +96,7 @@ end
 local function stopUpdating(self: PlaybackImpl)
 	if self._updating then
 		self._updating = false
-		TemporalAdapter._setUpdating(self._adapter, asAdapterAttachment(self), false)
+		TemporalAdapter._setUpdating(self._adapter, asPlaybackSink(self), false)
 	end
 end
 
@@ -113,7 +104,7 @@ local function detach(self: PlaybackImpl)
 	stopUpdating(self)
 	if self._attached then
 		self._attached = false
-		TemporalAdapter._detach(self._adapter, asAdapterAttachment(self))
+		TemporalAdapter._detach(self._adapter, asPlaybackSink(self))
 	end
 end
 
@@ -155,7 +146,7 @@ local function emitEnded(self: PlaybackImpl, completion: Completion)
 	self._deliveringEnded = false
 end
 
-finish = function(self: PlaybackImpl, status: TerminalStatus, reason: string?)
+local function finish(self: PlaybackImpl, status: TerminalStatus, reason: string?)
 	if self._completion ~= nil or self._finishing then
 		return
 	end
@@ -176,6 +167,23 @@ finish = function(self: PlaybackImpl, status: TerminalStatus, reason: string?)
 	self._finishing = false
 	emitEnded(self, completion)
 end
+
+local function requestTerminal(self: PlaybackImpl, status: TerminalStatus, reason: string?)
+	if self._completion ~= nil or self._terminalRequest ~= nil or self._finishing then
+		return
+	end
+	if self._busy then
+		self._terminalRequest = {
+			status = status,
+			reason = reason,
+		}
+		self._operations = {}
+		return
+	end
+	finish(self, status, reason)
+end
+
+-- Event and boundary traversal
 
 local function invokeEvent(self: PlaybackImpl, callback: (PlaybackContext) -> ()): boolean
 	self._workCount += 1
@@ -369,6 +377,8 @@ local function advanceTo(self: PlaybackImpl, target: number, direction: Traversa
 	return true
 end
 
+-- Anchors and scheduling
+
 local function derivePosition(self: PlaybackImpl, clockPosition: number): number?
 	local delta = clockPosition - self._anchorClock
 	local position = self._anchorSequence + delta * self._playbackSpeed
@@ -424,7 +434,7 @@ local function refreshUpdating(self: PlaybackImpl)
 		return
 	end
 	if shouldUpdate then
-		if not TemporalAdapter._setUpdating(self._adapter, asAdapterAttachment(self), true) then
+		if not TemporalAdapter._setUpdating(self._adapter, asPlaybackSink(self), true) then
 			requestTerminal(self, "failed", "phaseBindFailed")
 			return
 		end
@@ -612,6 +622,8 @@ local function reconcileReached(self: PlaybackImpl, sample: ClockSample)
 	reconcileSample(self, sample, true)
 end
 
+-- Discontinuities and reconstruction
+
 local function reconstructTo(self: PlaybackImpl, target: number, disposeCurrent: boolean): boolean
 	if disposeCurrent and not disposeGeneration(self) then
 		requestTerminal(self, "failed", "cleanupFailed")
@@ -731,6 +743,8 @@ local function applyClockChange(self: PlaybackImpl, change: ClockChange, sample:
 	refreshOwnership(self, true)
 end
 
+-- Continuous updates
+
 local function updateOverlap(
 	fromPosition: number,
 	toPosition: number,
@@ -801,6 +815,8 @@ local function applyPhase(self: PlaybackImpl, sample: ClockSample)
 	end
 end
 
+-- Mutation serialization and reentrancy
+
 local function applyPause(self: PlaybackImpl, sample: ClockSample)
 	if self._status ~= "playing" then
 		return
@@ -821,7 +837,7 @@ local function applyResume(self: PlaybackImpl, sample: ClockSample, clockSerial:
 	self._appliedClockSerial = math.max(self._appliedClockSerial, clockSerial)
 	reanchor(self, sample)
 	self._status = "playing"
-	if not TemporalAdapter._attach(self._adapter, asAdapterAttachment(self)) then
+	if not TemporalAdapter._attach(self._adapter, asPlaybackSink(self)) then
 		requestTerminal(self, "failed", "adapterAttachFailed")
 		return
 	end
@@ -935,7 +951,7 @@ local function nextOperationIndex(self: PlaybackImpl): number?
 	return nil
 end
 
-drainOperations = function(self: PlaybackImpl)
+local function drainOperations(self: PlaybackImpl)
 	if self._busy or self._completion ~= nil then
 		return
 	end
@@ -974,6 +990,8 @@ local function enqueue(self: PlaybackImpl, operation: Operation)
 	table.insert(self._operations, operation)
 	drainOperations(self)
 end
+
+-- Construction and public methods
 
 local PlaybackModuleTable = {}
 
@@ -1048,7 +1066,7 @@ function PlaybackMethods.play(self: PlaybackImpl): Playback
 	self._clockRate = sample.rate
 	self._appliedClockSerial = clockSerial
 	self._position = self._initialPosition
-	if not TemporalAdapter._attach(self._adapter, asAdapterAttachment(self)) then
+	if not TemporalAdapter._attach(self._adapter, asPlaybackSink(self)) then
 		finish(self, "failed", "adapterAttachFailed")
 		return self
 	end

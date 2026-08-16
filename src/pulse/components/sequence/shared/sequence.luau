@@ -2,23 +2,24 @@
 --!optimize 2
 --!native
 
-local Types = require(script.Parent.types.sequence)
+local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
+local Types = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
 
-type AddressPolicy = Types.AddressPolicy
+type AddressPolicy = DefTypes.AddressPolicy
 type Builder = Types.Builder
 type BuilderImpl = Types.BuilderImpl
 type CompiledEvent = Types.CompiledEvent
 type CompiledUpdate = Types.CompiledUpdate
 type Event = Types.Event
 type EventCallback = Types.EventCallback
-type LoopChange = Types.LoopChange
-type PlaybackContext = Types.PlaybackContext
-type PlaybackPosition = Types.PlaybackPosition
+type LoopChange = DefTypes.LoopChange
+type PlaybackContext = DefTypes.PlaybackContext
+type PlaybackPosition = DefTypes.PlaybackPosition
 type Sequence = Types.Sequence
-type SequenceAddress = Types.SequenceAddress
+type SequenceAddress = DefTypes.SequenceAddress
 type SequenceDefinition = Types.SequenceDefinition
 type SequenceImpl = Types.SequenceImpl
-type TraversalDirection = Types.TraversalDirection
+type TraversalDirection = DefTypes.TraversalDirection
 type Update = Types.Update
 
 type SequenceModule = {

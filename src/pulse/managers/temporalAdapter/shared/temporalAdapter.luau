@@ -2,20 +2,20 @@
 --!optimize 2
 --!native
 
-local Types = require(script.Parent.types.temporalAdapter)
+local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
+local Types = require(script.Parent.Parent.Parent.Parent.types.managers.temporalAdapter)
 
 type ClockChange = Types.ClockChange
 type ClockSample = Types.ClockSample
 type DirectionTokens<DirectionTokenT> = Types.DirectionTokens<DirectionTokenT>
-type ErasedClock = Types.ErasedClock
-type ErasedDirectionTokens = Types.ErasedDirectionTokens
-type PlaybackAttachment = Types.PlaybackAttachment
+type PlaybackSink = Types.PlaybackSink
 type ProviderClock<PhaseInputT, DirectionTokenT> = Types.ProviderClock<PhaseInputT, DirectionTokenT>
 type ReachedCallback = Types.ReachedCallback
 type ScheduledTaskId = Types.ScheduledTaskId
+type StoredClock = Types.StoredClock
 type TemporalAdapter = Types.TemporalAdapter
 type TemporalAdapterImpl = Types.TemporalAdapterImpl
-type TraversalDirection = "forward" | "backward"
+type TraversalDirection = DefTypes.TraversalDirection
 
 type TemporalAdapterModule = {
 	new: <PhaseInputT, DirectionTokenT>(
@@ -24,9 +24,9 @@ type TemporalAdapterModule = {
 		directions: DirectionTokens<DirectionTokenT>
 	) -> TemporalAdapter,
 	_snapshot: (adapter: TemporalAdapter) -> (ClockSample?, number),
-	_attach: (adapter: TemporalAdapter, playback: PlaybackAttachment) -> boolean,
-	_detach: (adapter: TemporalAdapter, playback: PlaybackAttachment) -> (),
-	_setUpdating: (adapter: TemporalAdapter, playback: PlaybackAttachment, updating: boolean) -> boolean,
+	_attach: (adapter: TemporalAdapter, playback: PlaybackSink) -> boolean,
+	_detach: (adapter: TemporalAdapter, playback: PlaybackSink) -> (),
+	_setUpdating: (adapter: TemporalAdapter, playback: PlaybackSink, updating: boolean) -> boolean,
 	_schedule: (
 		adapter: TemporalAdapter,
 		timePosition: number,
@@ -42,11 +42,68 @@ AdapterMethods.__index = AdapterMethods
 
 local MAX_NOTIFICATION_WORK = 4_096
 
+local function isFinite(value: number): boolean
+	return value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function assertClockSample(value: unknown): ClockSample
+	assert(type(value) == "table", "Pulse clock read must return a table")
+	local fields = value :: { [string]: unknown }
+	local timePosition = fields.timePosition
+	local rate = fields.rate
+	local revision = fields.revision
+	assert(type(timePosition) == "number" and isFinite(timePosition), "Pulse clock timePosition must be finite")
+	assert(type(rate) == "number" and isFinite(rate), "Pulse clock rate must be finite")
+	assert(
+		revision == nil or (type(revision) == "number" and isFinite(revision)),
+		"Pulse clock revision must be finite"
+	)
+	return {
+		timePosition = timePosition,
+		rate = rate,
+		revision = revision :: number?,
+	}
+end
+
+local function assertClockChange(value: unknown): ClockChange
+	assert(type(value) == "table", "Pulse clock change must be a table")
+	local fields = value :: { [string]: unknown }
+	local kind = fields.kind
+	local previous = fields.previousTimePosition
+	local current = fields.currentTimePosition
+	local discontinuous = fields.discontinuous
+	local currentMapping = fields.current
+	local revision: number? = nil
+	if currentMapping ~= nil then
+		assert(type(currentMapping) == "table", "Pulse clock change current mapping must be a table")
+		local rawRevision = (currentMapping :: { [string]: unknown }).revision
+		assert(
+			rawRevision == nil or (type(rawRevision) == "number" and isFinite(rawRevision)),
+			"Pulse clock change revision must be finite"
+		)
+		revision = rawRevision :: number?
+	end
+	assert(kind == nil or type(kind) == "string", "Pulse clock change kind must be a string")
+	assert(
+		previous == nil or (type(previous) == "number" and isFinite(previous)),
+		"Pulse clock previousTimePosition must be finite"
+	)
+	assert(type(current) == "number" and isFinite(current), "Pulse clock currentTimePosition must be finite")
+	assert(type(discontinuous) == "boolean", "Pulse clock discontinuous must be boolean")
+	return {
+		kind = kind :: string?,
+		previousTimePosition = previous :: number?,
+		currentTimePosition = current,
+		discontinuous = discontinuous,
+		revision = revision,
+	}
+end
+
 local function asImpl(adapter: TemporalAdapter): TemporalAdapterImpl
 	return (adapter :: unknown) :: TemporalAdapterImpl
 end
 
-local function findAttachment(values: { PlaybackAttachment }, candidate: PlaybackAttachment): number?
+local function findAttachment(values: { PlaybackSink }, candidate: PlaybackSink): number?
 	for index, value in values do
 		if value == candidate then
 			return index
@@ -55,7 +112,7 @@ local function findAttachment(values: { PlaybackAttachment }, candidate: Playbac
 	return nil
 end
 
-local function removeAttachment(values: { PlaybackAttachment }, candidate: PlaybackAttachment): boolean
+local function removeAttachment(values: { PlaybackSink }, candidate: PlaybackSink): boolean
 	local index = findAttachment(values, candidate)
 	if index == nil then
 		return false
@@ -83,7 +140,7 @@ local function readClock(self: TemporalAdapterImpl): ClockSample?
 	if not readOk then
 		return nil
 	end
-	local parseOk, sample = pcall(Types.assertClockSample, rawSample)
+	local parseOk, sample = pcall(assertClockSample, rawSample)
 	if not parseOk then
 		return nil
 	end
@@ -124,7 +181,7 @@ local function dispatchNotifications(self: TemporalAdapterImpl)
 		end
 		local notification = table.remove(self._notifications, 1)
 		assert(notification ~= nil, "Pulse adapter notification queue invariant failed")
-		local snapshot: { PlaybackAttachment } =
+		local snapshot: { PlaybackSink } =
 			table.clone(if notification.kind == "clock" then self._attachments else self._updating)
 		for _, playback in snapshot do
 			local isAttached = if notification.kind == "clock"
@@ -156,7 +213,7 @@ local function notifyClockChange(self: TemporalAdapterImpl, rawChange: unknown)
 	if self._destroyed then
 		return
 	end
-	local parseOk, change = pcall(Types.assertClockChange, rawChange)
+	local parseOk, change = pcall(assertClockChange, rawChange)
 	if not parseOk then
 		notifyAdapterDestroyed(self, "invalidClockChange")
 		return
@@ -214,8 +271,8 @@ function TemporalAdapter.new<PhaseInputT, DirectionTokenT>(
 	directions: DirectionTokens<DirectionTokenT>
 ): TemporalAdapter
 	assert(directions.forward ~= directions.backward, "Pulse direction tokens must be distinct")
-	local erasedClock = (clock :: unknown) :: ErasedClock
-	local erasedDirections: ErasedDirectionTokens = {
+	local storedClock = (clock :: unknown) :: StoredClock
+	local storedDirections: DirectionTokens<unknown> = {
 		forward = directions.forward,
 		backward = directions.backward,
 	}
@@ -228,9 +285,9 @@ function TemporalAdapter.new<PhaseInputT, DirectionTokenT>(
 	end
 	self = (
 		setmetatable({
-			_clock = erasedClock,
+			_clock = storedClock,
 			_phase = phase,
-			_directions = erasedDirections,
+			_directions = storedDirections,
 			_destroyed = false,
 			_attachments = {},
 			_updating = {},
@@ -266,7 +323,7 @@ function TemporalAdapter._snapshot(adapter: TemporalAdapter): (ClockSample?, num
 	return readClock(self), self._clockSerial
 end
 
-function TemporalAdapter._attach(adapter: TemporalAdapter, playback: PlaybackAttachment): boolean
+function TemporalAdapter._attach(adapter: TemporalAdapter, playback: PlaybackSink): boolean
 	local self = asImpl(adapter)
 	if self._destroyed or clockIsDestroyed(self) then
 		return false
@@ -285,7 +342,7 @@ function TemporalAdapter._attach(adapter: TemporalAdapter, playback: PlaybackAtt
 	return true
 end
 
-function TemporalAdapter._detach(adapter: TemporalAdapter, playback: PlaybackAttachment)
+function TemporalAdapter._detach(adapter: TemporalAdapter, playback: PlaybackSink)
 	local self = asImpl(adapter)
 	if removeAttachment(self._updating, playback) and #self._updating == 0 then
 		local release = self._phaseRelease
@@ -299,11 +356,7 @@ function TemporalAdapter._detach(adapter: TemporalAdapter, playback: PlaybackAtt
 	end
 end
 
-function TemporalAdapter._setUpdating(
-	adapter: TemporalAdapter,
-	playback: PlaybackAttachment,
-	updating: boolean
-): boolean
+function TemporalAdapter._setUpdating(adapter: TemporalAdapter, playback: PlaybackSink, updating: boolean): boolean
 	local self = asImpl(adapter)
 	if updating then
 		if self._destroyed or findAttachment(self._attachments, playback) == nil then
