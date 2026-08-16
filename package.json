@@ -1,0 +1,20 @@
+{
+  "name": "pulse-docs",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Documentation for Pulse, a clock-driven sequence playback runtime for Roblox.",
+  "scripts": {
+    "docs:dev": "vitepress dev docs --host 127.0.0.1",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs --host 127.0.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emdomanus/pulse.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

@@ -1,0 +1,112 @@
+:root {
+	--vp-c-bg: #fbf7ff;
+	--vp-c-bg-alt: #f2eafd;
+	--vp-c-bg-elv: #ffffff;
+	--vp-c-bg-soft: #f2eafd;
+	--vp-c-text-1: #281c35;
+	--vp-c-text-2: #554368;
+	--vp-c-text-3: #7d698f;
+	--vp-c-divider: #d9cbe5;
+	--vp-c-border: #cbb9dc;
+	--vp-c-gutter: #d9cbe5;
+	--vp-c-brand-1: #7a32b8;
+	--vp-c-brand-2: #964bd1;
+	--vp-c-brand-3: #c17cf2;
+	--vp-c-brand-soft: rgb(150 75 209 / 0.14);
+	--vp-button-brand-border: #964bd1;
+	--vp-button-brand-text: #ffffff;
+	--vp-button-brand-bg: #7a32b8;
+	--vp-button-brand-hover-border: #964bd1;
+	--vp-button-brand-hover-bg: #964bd1;
+	--vp-button-brand-active-border: #64259b;
+	--vp-button-brand-active-bg: #64259b;
+	--vp-code-bg: #eee5f7;
+	--vp-code-color: #281c35;
+	--vp-code-block-bg: #1b1324;
+	--vp-code-line-highlight-color: rgb(193 124 242 / 0.12);
+}
+
+.dark {
+	--vp-c-bg: #100b16;
+	--vp-c-bg-alt: #18101f;
+	--vp-c-bg-elv: #21162b;
+	--vp-c-bg-soft: #21162b;
+	--vp-c-text-1: #f4eaff;
+	--vp-c-text-2: #d6c1e8;
+	--vp-c-text-3: #a98fbe;
+	--vp-c-divider: #342540;
+	--vp-c-border: #4b365b;
+	--vp-c-gutter: #342540;
+	--vp-c-brand-1: #c17cf2;
+	--vp-c-brand-2: #d69cff;
+	--vp-c-brand-3: #964bd1;
+	--vp-c-brand-soft: rgb(193 124 242 / 0.16);
+	--vp-code-bg: #21162b;
+	--vp-code-color: #f4eaff;
+	--vp-code-block-bg: #18101f;
+	--vp-code-line-highlight-color: rgb(193 124 242 / 0.14);
+}
+
+.VPNavBarTitle .title,
+.VPDoc h1,
+.VPDoc h2,
+.VPDoc h3 {
+	letter-spacing: -0.02em;
+}
+
+.VPHero .name {
+	background: linear-gradient(120deg, #7a32b8, #c17cf2 55%, #f080d0);
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+}
+
+.vp-doc table {
+	display: table;
+	width: 100%;
+}
+
+.api-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: -8px 0 24px;
+}
+
+.api-badge {
+	display: inline-flex;
+	align-items: center;
+	min-height: 24px;
+	padding: 2px 9px;
+	border: 1px solid var(--vp-c-border);
+	border-radius: 999px;
+	background: var(--vp-c-bg-soft);
+	color: var(--vp-c-text-2);
+	font-family: var(--vp-font-family-mono);
+	font-size: 12px;
+	font-weight: 650;
+}
+
+.api-badge--public {
+	border-color: color-mix(in srgb, var(--vp-c-brand-1) 48%, var(--vp-c-border));
+	background: var(--vp-c-brand-soft);
+	color: var(--vp-c-brand-1);
+}
+
+.api-badge--internal {
+	opacity: 0.82;
+}
+
+.api-path {
+	margin: -12px 0 22px;
+	color: var(--vp-c-text-3);
+	font-family: var(--vp-font-family-mono);
+	font-size: 13px;
+}
+
+@media (max-width: 700px) {
+	.vp-doc table {
+		display: block;
+		overflow-x: auto;
+	}
+}

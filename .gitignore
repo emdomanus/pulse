@@ -6,3 +6,6 @@ sourcemap.json
 *.tar.gz
 scripts/luau-lsp/globalTypes.d.luau
 tests/lune/.tmp/
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
