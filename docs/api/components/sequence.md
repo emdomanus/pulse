@@ -17,8 +17,8 @@ cursor, or cleanup.
 ```luau
 type Event<ContextT> = {
 	time: number,
-	run: (playback: PlaybackContext, context: ContextT) -> (),
-	reverse: ((playback: PlaybackContext, context: ContextT) -> ())?,
+	run: (playback: PlaybackControl, context: ContextT) -> (),
+	reverse: ((playback: PlaybackControl, context: ContextT) -> ())?,
 }
 ```
 
@@ -34,7 +34,7 @@ type Update<ContextT> = {
 	startTime: number?,
 	endTime: number?,
 	run: (
-		playback: PlaybackContext,
+		playback: PlaybackControl,
 		dt: number,
 		timePosition: number,
 		context: ContextT
@@ -60,8 +60,8 @@ type SequenceDefinition<ContextT> = {
 	addressPolicy: AddressPolicy?,
 	events: { Event<ContextT> }?,
 	updates: { Update<ContextT> }?,
-	onPlay: ((playback: PlaybackContext, context: ContextT) -> ())?,
-	onLoop: ((playback: PlaybackContext, change: LoopChange, context: ContextT) -> ())?,
+	onPlay: ((playback: PlaybackControl, context: ContextT) -> ())?,
+	onLoop: ((playback: PlaybackControl, change: LoopChange, context: ContextT) -> ())?,
 }
 ```
 

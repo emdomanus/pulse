@@ -10,7 +10,7 @@ type ClockChange = TemporalAdapterTypes.ClockChange
 type ClockSample = TemporalAdapterTypes.ClockSample
 type Completion = DefTypes.Completion
 type LoopChange = DefTypes.LoopChange
-type PlaybackContext = DefTypes.PlaybackContext
+type PlaybackControl = DefTypes.PlaybackControl
 type PlaybackPosition = DefTypes.PlaybackPosition
 type ReachedCallback = TemporalAdapterTypes.ReachedCallback
 type Release = DefTypes.Release
@@ -101,7 +101,7 @@ export type TerminalRequest = {
 
 export type BoundaryState = "before" | "after"
 
-export type Playback = PlaybackContext & {
+export type Playback = PlaybackControl & {
 	play: (self: Playback) -> Playback,
 	onEnded: (self: Playback, callback: EndedCallback) -> Release,
 	onLooped: (self: Playback, callback: LoopedCallback) -> Release,

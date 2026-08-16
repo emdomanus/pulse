@@ -21,7 +21,7 @@ type LoopedBinding = PlaybackTypes.LoopedBinding
 type LoopedCallback = PlaybackTypes.LoopedCallback
 type Operation = PlaybackTypes.Operation
 type Playback = PlaybackTypes.Playback
-type PlaybackContext = DefTypes.PlaybackContext
+type PlaybackControl = DefTypes.PlaybackControl
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
 type PlaybackOptions = PlaybackTypes.PlaybackOptions
 type PlaybackPosition = DefTypes.PlaybackPosition
@@ -80,8 +80,8 @@ local function clockDirection(rate: number): TraversalDirection?
 	return nil
 end
 
-local function asAttachment(self: PlaybackImpl): PlaybackContext
-	return (self :: unknown) :: PlaybackContext
+local function asControl(self: PlaybackImpl): PlaybackControl
+	return (self :: unknown) :: PlaybackControl
 end
 
 local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
@@ -201,13 +201,13 @@ end
 
 -- Event and boundary traversal
 
-local function invokeEvent(self: PlaybackImpl, callback: (PlaybackContext, unknown) -> ()): boolean
+local function invokeEvent(self: PlaybackImpl, callback: (PlaybackControl, unknown) -> ()): boolean
 	self._workCount += 1
 	if self._workCount > MAX_RECONCILIATION_WORK then
 		requestTerminal(self, "failed", "catchUpLimitExceeded")
 		return false
 	end
-	if not pcall(callback, asAttachment(self), self._context) then
+	if not pcall(callback, asControl(self), self._context) then
 		requestTerminal(self, "failed", "callbackFailed")
 		return false
 	end
@@ -222,7 +222,7 @@ local function emitLoop(self: PlaybackImpl, change: LoopChange): boolean
 		return false
 	end
 	local authored = SequenceRuntime.getOnLoop(self._sequence)
-	if authored ~= nil and not pcall(authored, asAttachment(self), immutableChange, self._context) then
+	if authored ~= nil and not pcall(authored, asControl(self), immutableChange, self._context) then
 		requestTerminal(self, "failed", "callbackFailed")
 		return false
 	end
@@ -868,7 +868,7 @@ runPhaseUpdates = function(self: PlaybackImpl, fromPosition: number, toPosition:
 					requestTerminal(self, "failed", "catchUpLimitExceeded")
 					return
 				end
-				if not pcall(update.run, asAttachment(self), overlap, localNow, self._context) then
+				if not pcall(update.run, asControl(self), overlap, localNow, self._context) then
 					requestTerminal(self, "failed", "callbackFailed")
 					return
 				end

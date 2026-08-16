@@ -66,11 +66,11 @@ local function provePublicContract(
 		events = {
 			{
 				time = 1,
-				run = function(playback: Pulse.PlaybackContext, context: InvocationContext)
+				run = function(playback: Pulse.PlaybackControl, context: InvocationContext)
 					local _actorId: number = context.actorId
 					playback:addCleanup(function() end)
 				end,
-				reverse = function(playback: Pulse.PlaybackContext, context: InvocationContext)
+				reverse = function(playback: Pulse.PlaybackControl, context: InvocationContext)
 					local _worldPosition: Vector3 = context.worldPosition
 					local address: Pulse.SequenceAddress = { timePosition = 0 }
 					playback:seek(address)
@@ -82,7 +82,7 @@ local function provePublicContract(
 				startTime = 0,
 				endTime = 2,
 				run = function(
-					playback: Pulse.PlaybackContext,
+					playback: Pulse.PlaybackControl,
 					clockDt: number,
 					timePosition: number,
 					context: InvocationContext

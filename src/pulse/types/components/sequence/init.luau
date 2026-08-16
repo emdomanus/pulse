@@ -6,17 +6,17 @@ local DefTypes = require(script.Parent.Parent.def)
 
 type AddressPolicy = DefTypes.AddressPolicy
 type LoopChange = DefTypes.LoopChange
-type PlaybackContext = DefTypes.PlaybackContext
+type PlaybackControl = DefTypes.PlaybackControl
 type TraversalDirection = DefTypes.TraversalDirection
 
-export type EventCallback<ContextT> = (playback: PlaybackContext, context: ContextT) -> ()
+export type EventCallback<ContextT> = (playback: PlaybackControl, context: ContextT) -> ()
 export type UpdateCallback<ContextT> = (
-	playback: PlaybackContext,
+	playback: PlaybackControl,
 	dt: number,
 	timePosition: number,
 	context: ContextT
 ) -> ()
-export type LoopCallback<ContextT> = (playback: PlaybackContext, change: LoopChange, context: ContextT) -> ()
+export type LoopCallback<ContextT> = (playback: PlaybackControl, change: LoopChange, context: ContextT) -> ()
 
 export type Event<ContextT> = {
 	time: number,

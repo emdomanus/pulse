@@ -17,10 +17,10 @@ type Builder<ContextT> = {
 	addressPolicy: (self: Builder<ContextT>, policy: AddressPolicy) -> Builder<ContextT>,
 	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
 	update: (self: Builder<ContextT>, update: Update<ContextT>) -> Builder<ContextT>,
-	onPlay: (self: Builder<ContextT>, callback: (PlaybackContext, ContextT) -> ()) -> Builder<ContextT>,
+	onPlay: (self: Builder<ContextT>, callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>,
 	onLoop: (
 		self: Builder<ContextT>,
-		callback: (PlaybackContext, LoopChange, ContextT) -> ()
+		callback: (PlaybackControl, LoopChange, ContextT) -> ()
 	) -> Builder<ContextT>,
 	compile: (self: Builder<ContextT>) -> Sequence<ContextT>,
 }
@@ -103,7 +103,7 @@ Copies and appends a continuous update interval.
 ### Builder:onPlay
 
 ```luau
-Builder<ContextT>:onPlay(callback: (PlaybackContext, ContextT) -> ()) -> Builder<ContextT>
+Builder<ContextT>:onPlay(callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>
 ```
 
 Sets the callback that opens each initial or rebuilt generation.
@@ -113,7 +113,7 @@ Sets the callback that opens each initial or rebuilt generation.
 
 ```luau
 Builder<ContextT>:onLoop(
-	callback: (PlaybackContext, LoopChange, ContextT) -> ()
+	callback: (PlaybackControl, LoopChange, ContextT) -> ()
 ) -> Builder<ContextT>
 ```
 

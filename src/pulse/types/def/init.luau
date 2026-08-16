@@ -32,17 +32,17 @@ export type Completion = {
 	reason: string?,
 }
 
-export type PlaybackContext = {
-	pause: (self: PlaybackContext) -> (),
-	resume: (self: PlaybackContext) -> (),
-	setPlaybackSpeed: (self: PlaybackContext, speed: number) -> (),
-	getPlaybackSpeed: (self: PlaybackContext) -> number,
-	seek: (self: PlaybackContext, address: SequenceAddress) -> boolean,
-	getPosition: (self: PlaybackContext) -> PlaybackPosition,
-	getStatus: (self: PlaybackContext) -> Status,
-	addCleanup: (self: PlaybackContext, cleanup: () -> ()) -> (),
-	cancel: (self: PlaybackContext, reason: string?) -> (),
-	destroy: (self: PlaybackContext) -> (),
+export type PlaybackControl = {
+	pause: (self: PlaybackControl) -> (),
+	resume: (self: PlaybackControl) -> (),
+	setPlaybackSpeed: (self: PlaybackControl, speed: number) -> (),
+	getPlaybackSpeed: (self: PlaybackControl) -> number,
+	seek: (self: PlaybackControl, address: SequenceAddress) -> boolean,
+	getPosition: (self: PlaybackControl) -> PlaybackPosition,
+	getStatus: (self: PlaybackControl) -> Status,
+	addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),
+	cancel: (self: PlaybackControl, reason: string?) -> (),
+	destroy: (self: PlaybackControl) -> (),
 }
 
 return {}

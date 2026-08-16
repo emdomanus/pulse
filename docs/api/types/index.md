@@ -24,7 +24,7 @@ type TemporalAdapter = Pulse.TemporalAdapter
 
 ## Sequence authoring
 
-- [PlaybackContext](../components/playback.md#playback-context)
+- [PlaybackControl](../components/playback.md#playback-control)
 - [Event&lt;ContextT&gt;](../components/sequence.md#event)
 - [Update&lt;ContextT&gt;](../components/sequence.md#update)
 - [SequenceDefinition&lt;ContextT&gt;](../components/sequence.md#sequence-definition)

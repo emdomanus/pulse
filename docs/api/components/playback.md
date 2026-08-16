@@ -32,24 +32,24 @@ type PlaybackOptions = {
 Negative speed reverses traversal, and zero speed makes the Playback dormant without pausing its
 lifecycle. For looping Sequences, `position.loopIndex` selects the exact logical cycle.
 
-<a id="playback-context"></a>
-## PlaybackContext
+<a id="playback-control"></a>
+## PlaybackControl
 
 The capability passed to authored event, update, setup, and loop callbacks. It contains the
 Playback control and read methods, but not `play`, observers, or completion access.
 
 ```luau
-type PlaybackContext = {
-	pause: (self: PlaybackContext) -> (),
-	resume: (self: PlaybackContext) -> (),
-	setPlaybackSpeed: (self: PlaybackContext, speed: number) -> (),
-	getPlaybackSpeed: (self: PlaybackContext) -> number,
-	seek: (self: PlaybackContext, address: SequenceAddress) -> boolean,
-	getPosition: (self: PlaybackContext) -> PlaybackPosition,
-	getStatus: (self: PlaybackContext) -> Status,
-	addCleanup: (self: PlaybackContext, cleanup: () -> ()) -> (),
-	cancel: (self: PlaybackContext, reason: string?) -> (),
-	destroy: (self: PlaybackContext) -> (),
+type PlaybackControl = {
+	pause: (self: PlaybackControl) -> (),
+	resume: (self: PlaybackControl) -> (),
+	setPlaybackSpeed: (self: PlaybackControl, speed: number) -> (),
+	getPlaybackSpeed: (self: PlaybackControl) -> number,
+	seek: (self: PlaybackControl, address: SequenceAddress) -> boolean,
+	getPosition: (self: PlaybackControl) -> PlaybackPosition,
+	getStatus: (self: PlaybackControl) -> Status,
+	addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),
+	cancel: (self: PlaybackControl, reason: string?) -> (),
+	destroy: (self: PlaybackControl) -> (),
 }
 ```
 
@@ -75,7 +75,7 @@ An observer for logical forward or backward loop crossings.
 ## Playback
 
 ```luau
-type Playback = PlaybackContext & {
+type Playback = PlaybackControl & {
 	play: (self: Playback) -> Playback,
 	onEnded: (self: Playback, callback: (Completion) -> ()) -> Release,
 	onLooped: (self: Playback, callback: (LoopChange) -> ()) -> Release,
