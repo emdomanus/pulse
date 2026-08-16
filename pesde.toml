@@ -19,6 +19,3 @@ build_files = ["src"]
 
 [indices]
 default = "https://github.com/pesde-pkg/index"
-
-[dependencies]
-tempo = { name = "emdomanus/tempo", version = "^0.2.0" }

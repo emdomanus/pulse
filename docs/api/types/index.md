@@ -4,7 +4,7 @@ Every type below is exported from the Pulse package root. Links point to the can
 owns its behavior or value contract.
 
 ```luau
-type Sequence = Pulse.Sequence
+type Sequence<ContextT> = Pulse.Sequence<ContextT>
 type Playback = Pulse.Playback
 type TemporalAdapter = Pulse.TemporalAdapter
 ```
@@ -25,11 +25,11 @@ type TemporalAdapter = Pulse.TemporalAdapter
 ## Sequence authoring
 
 - [PlaybackContext](../components/playback.md#playback-context)
-- [Event](../components/sequence.md#event)
-- [Update](../components/sequence.md#update)
-- [SequenceDefinition](../components/sequence.md#sequence-definition)
-- [Sequence](../components/sequence.md#sequence)
-- [Builder](../components/builder.md#builder)
+- [Event&lt;ContextT&gt;](../components/sequence.md#event)
+- [Update&lt;ContextT&gt;](../components/sequence.md#update)
+- [SequenceDefinition&lt;ContextT&gt;](../components/sequence.md#sequence-definition)
+- [Sequence&lt;ContextT&gt;](../components/sequence.md#sequence)
+- [Builder&lt;ContextT&gt;](../components/builder.md#builder)
 
 ## Playback
 

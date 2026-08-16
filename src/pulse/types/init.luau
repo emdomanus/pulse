@@ -18,11 +18,11 @@ export type TerminalStatus = DefTypes.TerminalStatus
 export type Status = DefTypes.Status
 export type Completion = DefTypes.Completion
 export type PlaybackContext = DefTypes.PlaybackContext
-export type Event = SequenceTypes.Event
-export type Update = SequenceTypes.Update
-export type SequenceDefinition = SequenceTypes.SequenceDefinition
-export type Sequence = SequenceTypes.Sequence
-export type Builder = SequenceTypes.Builder
+export type Event<ContextT> = SequenceTypes.Event<ContextT>
+export type Update<ContextT> = SequenceTypes.Update<ContextT>
+export type SequenceDefinition<ContextT> = SequenceTypes.SequenceDefinition<ContextT>
+export type Sequence<ContextT> = SequenceTypes.Sequence<ContextT>
+export type Builder<ContextT> = SequenceTypes.Builder<ContextT>
 
 export type EndedCallback = PlaybackTypes.EndedCallback
 export type LoopedCallback = PlaybackTypes.LoopedCallback

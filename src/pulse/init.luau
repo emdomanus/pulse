@@ -18,11 +18,11 @@ export type TerminalStatus = Types.TerminalStatus
 export type Status = Types.Status
 export type Completion = Types.Completion
 export type PlaybackContext = Types.PlaybackContext
-export type Event = Types.Event
-export type Update = Types.Update
-export type SequenceDefinition = Types.SequenceDefinition
-export type Sequence = Types.Sequence
-export type Builder = Types.Builder
+export type Event<ContextT> = Types.Event<ContextT>
+export type Update<ContextT> = Types.Update<ContextT>
+export type SequenceDefinition<ContextT> = Types.SequenceDefinition<ContextT>
+export type Sequence<ContextT> = Types.Sequence<ContextT>
+export type Builder<ContextT> = Types.Builder<ContextT>
 export type EndedCallback = Types.EndedCallback
 export type LoopedCallback = Types.LoopedCallback
 export type PlaybackOptions = Types.PlaybackOptions
@@ -35,11 +35,11 @@ export type TemporalAdapter = Types.TemporalAdapter
 
 local Pulse = {}
 
-function Pulse.sequence(definition: SequenceDefinition): Sequence
+function Pulse.sequence<ContextT>(definition: SequenceDefinition<ContextT>): Sequence<ContextT>
 	return Sequence.new(definition)
 end
 
-function Pulse.builder(): Builder
+function Pulse.builder<ContextT>(): Builder<ContextT>
 	return Sequence.builder()
 end
 
@@ -51,8 +51,13 @@ function Pulse.temporalAdapter<PhaseInputT, DirectionTokenT>(
 	return TemporalAdapter.new(clock, phase, directions)
 end
 
-function Pulse.playback(sequence: Sequence, adapter: TemporalAdapter, options: PlaybackOptions?): Playback
-	return Playback.new(sequence, adapter, options)
+function Pulse.playback<ContextT>(
+	sequence: Sequence<ContextT>,
+	adapter: TemporalAdapter,
+	context: ContextT,
+	options: PlaybackOptions?
+): Playback
+	return Playback.new(sequence, adapter, context, options)
 end
 
 return Pulse

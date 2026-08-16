@@ -6,25 +6,24 @@ local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.Parent.types.components.sequence)
 
 type AddressPolicy = DefTypes.AddressPolicy
-type Builder = Types.Builder
-type BuilderImpl = Types.BuilderImpl
-type Event = Types.Event
-type EventCallback = Types.EventCallback
-type LoopChange = DefTypes.LoopChange
-type PlaybackContext = DefTypes.PlaybackContext
-type Sequence = Types.Sequence
-type SequenceConstructor = Types.SequenceConstructor
-type Update = Types.Update
+type Builder<ContextT> = Types.Builder<ContextT>
+type BuilderImpl<ContextT> = Types.BuilderImpl<ContextT>
+type Event<ContextT> = Types.Event<ContextT>
+type EventCallback<ContextT> = Types.EventCallback<ContextT>
+type LoopCallback<ContextT> = Types.LoopCallback<ContextT>
+type Sequence<ContextT> = Types.Sequence<ContextT>
+type SequenceConstructor<ContextT> = Types.SequenceConstructor<ContextT>
+type Update<ContextT> = Types.Update<ContextT>
 
 type BuilderModule = {
-	new: (constructSequence: SequenceConstructor) -> Builder,
+	new: <ContextT>(constructSequence: SequenceConstructor<ContextT>) -> Builder<ContextT>,
 }
 
 local Builder = {}
 Builder.__index = Builder
 
-local function ConstructBuilder(constructSequence: SequenceConstructor): Builder
-	local self: BuilderImpl = (
+local function ConstructBuilder<ContextT>(constructSequence: SequenceConstructor<ContextT>): Builder<ContextT>
+	local self: BuilderImpl<ContextT> = (
 		setmetatable({
 			_constructSequence = constructSequence,
 			_duration = nil,
@@ -35,26 +34,26 @@ local function ConstructBuilder(constructSequence: SequenceConstructor): Builder
 			_onPlay = nil,
 			_onLoop = nil,
 		}, Builder) :: unknown
-	) :: BuilderImpl
+	) :: BuilderImpl<ContextT>
 	return self
 end
 
-function Builder.duration(self: BuilderImpl, seconds: number): Builder
+function Builder.duration<ContextT>(self: BuilderImpl<ContextT>, seconds: number): Builder<ContextT>
 	self._duration = seconds
 	return self
 end
 
-function Builder.loop(self: BuilderImpl, enabled: boolean?): Builder
+function Builder.loop<ContextT>(self: BuilderImpl<ContextT>, enabled: boolean?): Builder<ContextT>
 	self._loop = if enabled == nil then true else enabled
 	return self
 end
 
-function Builder.addressPolicy(self: BuilderImpl, policy: AddressPolicy): Builder
+function Builder.addressPolicy<ContextT>(self: BuilderImpl<ContextT>, policy: AddressPolicy): Builder<ContextT>
 	self._addressPolicy = policy
 	return self
 end
 
-function Builder.event(self: BuilderImpl, event: Event): Builder
+function Builder.event<ContextT>(self: BuilderImpl<ContextT>, event: Event<ContextT>): Builder<ContextT>
 	table.insert(self._events, {
 		time = event.time,
 		run = event.run,
@@ -63,7 +62,7 @@ function Builder.event(self: BuilderImpl, event: Event): Builder
 	return self
 end
 
-function Builder.update(self: BuilderImpl, update: Update): Builder
+function Builder.update<ContextT>(self: BuilderImpl<ContextT>, update: Update<ContextT>): Builder<ContextT>
 	table.insert(self._updates, {
 		startTime = update.startTime,
 		endTime = update.endTime,
@@ -72,17 +71,17 @@ function Builder.update(self: BuilderImpl, update: Update): Builder
 	return self
 end
 
-function Builder.onPlay(self: BuilderImpl, callback: EventCallback): Builder
+function Builder.onPlay<ContextT>(self: BuilderImpl<ContextT>, callback: EventCallback<ContextT>): Builder<ContextT>
 	self._onPlay = callback
 	return self
 end
 
-function Builder.onLoop(self: BuilderImpl, callback: (PlaybackContext, LoopChange) -> ()): Builder
+function Builder.onLoop<ContextT>(self: BuilderImpl<ContextT>, callback: LoopCallback<ContextT>): Builder<ContextT>
 	self._onLoop = callback
 	return self
 end
 
-function Builder.compile(self: BuilderImpl): Sequence
+function Builder.compile<ContextT>(self: BuilderImpl<ContextT>): Sequence<ContextT>
 	local duration = self._duration
 	assert(duration ~= nil, "Pulse Builder requires duration before compile")
 	return self._constructSequence({

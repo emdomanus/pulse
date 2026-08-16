@@ -92,14 +92,14 @@ type Playback = {
 
 type Event = {
 	time: number,
-	run: (playback: Playback) -> (),
-	reverse: ((playback: Playback) -> ())?,
+	run: (playback: Playback, context: unknown) -> (),
+	reverse: ((playback: Playback, context: unknown) -> ())?,
 }
 
 type Update = {
 	startTime: number?,
 	endTime: number?,
-	run: (playback: Playback, dt: number, timePosition: number) -> (),
+	run: (playback: Playback, dt: number, timePosition: number, context: unknown) -> (),
 }
 
 type Definition = {
@@ -108,8 +108,8 @@ type Definition = {
 	addressPolicy: ("skip" | "rebuild" | "cancel")?,
 	events: { Event }?,
 	updates: { Update }?,
-	onPlay: ((playback: Playback) -> ())?,
-	onLoop: ((playback: Playback, change: unknown) -> ())?,
+	onPlay: ((playback: Playback, context: unknown) -> ())?,
+	onLoop: ((playback: Playback, change: unknown, context: unknown) -> ())?,
 }
 
 type Sequence = {
@@ -124,7 +124,7 @@ type Builder = {
 	addressPolicy: (self: Builder, policy: "skip" | "rebuild" | "cancel") -> Builder,
 	event: (self: Builder, event: Event) -> Builder,
 	update: (self: Builder, update: Update) -> Builder,
-	onPlay: (self: Builder, callback: (playback: Playback) -> ()) -> Builder,
+	onPlay: (self: Builder, callback: (playback: Playback, context: unknown) -> ()) -> Builder,
 	compile: (self: Builder) -> Sequence,
 }
 
@@ -140,6 +140,7 @@ type PulseApi = {
 	playback: (
 		sequence: Sequence,
 		adapter: TemporalAdapter,
+		context: unknown,
 		options: {
 			playbackSpeed: number?,
 			position: { timePosition: number, loopIndex: number? }?,
@@ -181,13 +182,15 @@ local function createPlayback(
 	}?
 ): (Playback, TemporalAdapter)
 	local adapter = adapterFor(clock)
-	return Pulse.playback(Pulse.sequence(definition), adapter, options), adapter
+	return Pulse.playback(Pulse.sequence(definition), adapter, nil, options), adapter
 end
 
 Harness.test("compiler validates, freezes, and builder keeps fluent temporal names", function()
+	local instant = Pulse.sequence({ duration = 0 })
+	Harness.assertEqual(instant:getDuration(), 0)
 	Harness.assertThrows(function()
-		Pulse.sequence({ duration = 0 })
-	end, "greater than zero")
+		Pulse.sequence({ duration = 0, loop = true })
+	end, "looping sequences require duration greater than zero")
 	Harness.assertThrows(function()
 		Pulse.sequence({
 			duration = 1,
@@ -210,7 +213,7 @@ Harness.test("compiler validates, freezes, and builder keeps fluent temporal nam
 	local loopAdapter = adapterFor(loopClock)
 	local loopSequence = Pulse.sequence({ duration = 1, loop = true })
 	Harness.assertThrows(function()
-		Pulse.playback(loopSequence, loopAdapter, {
+		Pulse.playback(loopSequence, loopAdapter, nil, {
 			position = {
 				timePosition = 0.5,
 				loopIndex = 9_007_199_254_740_991,
@@ -218,6 +221,106 @@ Harness.test("compiler validates, freezes, and builder keeps fluent temporal nam
 		})
 	end, "exact")
 	loopAdapter:destroy()
+end)
+
+Harness.test("per-play context reaches every authored callback", function()
+	local context = {
+		actorId = 17,
+	}
+	local observed = {
+		onPlay = 0,
+		run = 0,
+		reverse = 0,
+		update = 0,
+		onLoop = 0,
+	}
+	local clock = FakeClock.new()
+	local adapter = adapterFor(clock)
+	local sequence = Pulse.sequence({
+		duration = 1,
+		loop = true,
+		events = {
+			{
+				time = 0.25,
+				run = function(_playback, received)
+					Harness.assertEqual(received, context)
+					observed.run += 1
+				end,
+				reverse = function(_playback, received)
+					Harness.assertEqual(received, context)
+					observed.reverse += 1
+				end,
+			},
+		},
+		updates = {
+			{
+				startTime = 0,
+				endTime = 1,
+				run = function(_playback, _dt, _timePosition, received)
+					Harness.assertEqual(received, context)
+					observed.update += 1
+				end,
+			},
+		},
+		onPlay = function(_playback, received)
+			Harness.assertEqual(received, context)
+			observed.onPlay += 1
+		end,
+		onLoop = function(_playback, _change, received)
+			Harness.assertEqual(received, context)
+			observed.onLoop += 1
+		end,
+	})
+	local playback = Pulse.playback(sequence, adapter, context)
+	playback:play()
+	clock:stepRootTo(1.25, PHASE)
+	clock:setRate(-1)
+	clock:stepRootTo(2.25, PHASE)
+	Harness.assertEqual(observed.onPlay, 1)
+	Harness.assertTrue(observed.run >= 1)
+	Harness.assertTrue(observed.reverse >= 1)
+	Harness.assertTrue(observed.update >= 1)
+	Harness.assertTrue(observed.onLoop >= 1)
+	playback:cancel()
+end)
+
+Harness.test("zero-duration playback runs once and completes without scheduling", function()
+	local clock = FakeClock.new({ rate = 0 })
+	local adapter = adapterFor(clock)
+	local context = { soundId = "impact" }
+	local order: { string } = {}
+	local sequence = Pulse.sequence({
+		duration = 0,
+		events = {
+			{
+				time = 0,
+				run = function(_playback, received)
+					Harness.assertEqual(received, context)
+					table.insert(order, "event")
+				end,
+			},
+		},
+		onPlay = function(playback, received)
+			Harness.assertEqual(received, context)
+			table.insert(order, "play")
+			playback:addCleanup(function()
+				table.insert(order, "cleanup")
+			end)
+		end,
+	})
+	local playback = Pulse.playback(sequence, adapter, context)
+	local ended = 0
+	playback:onEnded(function(completion)
+		ended += 1
+		Harness.assertEqual(completion.status, "completed")
+	end)
+	playback:play()
+	Harness.assertArrayEqual(order, { "play", "event", "cleanup" })
+	Harness.assertEqual(ended, 1)
+	Harness.assertEqual(clock:getTaskCount(), 0)
+	Harness.assertEqual(clock:getScheduleCount(), 0)
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
 end)
 
 Harness.test("inert creation is observable before synchronous completion", function()
@@ -393,8 +496,8 @@ Harness.test("two updating playbacks share exactly one adapter phase binding", f
 			{ startTime = 0, endTime = 1, run = function() end },
 		},
 	})
-	local first = Pulse.playback(sequence, adapter)
-	local second = Pulse.playback(sequence, adapter)
+	local first = Pulse.playback(sequence, adapter, nil)
+	local second = Pulse.playback(sequence, adapter, nil)
 	first:play()
 	second:play()
 	Harness.assertEqual(clock:getChangedBindingCount(), 1)
@@ -423,9 +526,10 @@ Harness.test("shared fanout keeps not-yet-notified playback inspection serialize
 				},
 			},
 		}),
-		adapter
+		adapter,
+		nil
 	)
-	second = Pulse.playback(Pulse.sequence({ duration = 2 }), adapter)
+	second = Pulse.playback(Pulse.sequence({ duration = 2 }), adapter, nil)
 	first:play()
 	second:play()
 	clock:advanceRootTo(0.5)
@@ -461,7 +565,8 @@ Harness.test("shared adapter serializes reentrant clock changes for every playba
 				},
 			},
 		}),
-		adapter
+		adapter,
+		nil
 	)
 	local second = Pulse.playback(
 		Pulse.sequence({
@@ -478,7 +583,8 @@ Harness.test("shared adapter serializes reentrant clock changes for every playba
 				},
 			},
 		}),
-		adapter
+		adapter,
+		nil
 	)
 	first:play()
 	second:play()
@@ -510,7 +616,8 @@ Harness.test("shared adapter serializes reentrant clock changes for every playba
 				},
 			},
 		}),
-		cycleAdapter
+		cycleAdapter,
+		nil
 	)
 	cycle:play()
 	cycleClock:stepRootTo(0.5, PHASE)
@@ -548,8 +655,8 @@ Harness.test("shared phase fanout completes before callback clock mutation", fun
 			{ startTime = 0, endTime = 2, run = function() end },
 		},
 	})
-	local first = Pulse.playback(firstSequence, adapter)
-	local second = Pulse.playback(secondSequence, adapter)
+	local first = Pulse.playback(firstSequence, adapter, nil)
+	local second = Pulse.playback(secondSequence, adapter, nil)
 	first:play()
 	second:play()
 	clock:stepRootTo(0.25, PHASE)
@@ -1048,8 +1155,8 @@ Harness.test("looping updates share phase execution across three complete loops"
 			},
 		},
 	})
-	local first = Pulse.playback(sequence, adapter)
-	local second = Pulse.playback(sequence, adapter)
+	local first = Pulse.playback(sequence, adapter, nil)
+	local second = Pulse.playback(sequence, adapter, nil)
 	first:play()
 	second:play()
 	Harness.assertEqual(clock:getPhaseBindingCount(), 1)

@@ -29,4 +29,4 @@ scheduling-capable clock through a
 [`TemporalAdapter`](./api/managers/temporalAdapter.md).
 
 Pulse contains no VFX, character, networking, or service policy. A consumer supplies those meanings
-through authored callbacks and owns any external state they create.
+through typed per-play context and authored callbacks, and owns any external state they create.

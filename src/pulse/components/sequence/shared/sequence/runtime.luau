@@ -5,16 +5,15 @@
 local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.Parent.types.components.sequence)
 
-type CompiledEvent = Types.CompiledEvent
-type CompiledUpdate = Types.CompiledUpdate
-type EventCallback = Types.EventCallback
-type LoopChange = DefTypes.LoopChange
-type PlaybackContext = DefTypes.PlaybackContext
+type EventCallback = Types.EventCallback<unknown>
+type LoopCallback = Types.LoopCallback<unknown>
 type PlaybackPosition = DefTypes.PlaybackPosition
-type Sequence = Types.Sequence
+type Sequence = Types.StoredSequence
 type SequenceAddress = DefTypes.SequenceAddress
 type SequenceBoundary = Types.SequenceBoundary
-type SequenceImpl = Types.SequenceImpl
+type SequenceImpl = Types.StoredSequenceImpl
+type StoredEvent = Types.StoredEvent
+type StoredUpdate = Types.StoredUpdate
 type TraversalDirection = DefTypes.TraversalDirection
 
 type RuntimeModule = {
@@ -27,10 +26,10 @@ type RuntimeModule = {
 	) -> SequenceBoundary?,
 	boundaryAt: (sequence: Sequence, position: PlaybackPosition) -> SequenceBoundary?,
 	eventRangeAt: (sequence: Sequence, localTimePosition: number) -> (number, number),
-	getEvent: (sequence: Sequence, index: number) -> CompiledEvent,
-	getUpdates: (sequence: Sequence) -> { CompiledUpdate },
+	getEvent: (sequence: Sequence, index: number) -> StoredEvent,
+	getUpdates: (sequence: Sequence) -> { StoredUpdate },
 	getOnPlay: (sequence: Sequence) -> EventCallback?,
-	getOnLoop: (sequence: Sequence) -> ((PlaybackContext, LoopChange) -> ())?,
+	getOnLoop: (sequence: Sequence) -> LoopCallback?,
 }
 
 local MAX_EXACT_INTEGER = 9_007_199_254_740_991
@@ -75,7 +74,7 @@ local function firstAfter(values: { number }, target: number): number
 	return low
 end
 
-local function eventFirstAtOrAfter(events: { CompiledEvent }, target: number): number
+local function eventFirstAtOrAfter(events: { StoredEvent }, target: number): number
 	local low = 1
 	local high = #events + 1
 	while low < high do
@@ -89,7 +88,7 @@ local function eventFirstAtOrAfter(events: { CompiledEvent }, target: number): n
 	return low
 end
 
-local function eventFirstAfter(events: { CompiledEvent }, target: number): number
+local function eventFirstAfter(events: { StoredEvent }, target: number): number
 	local low = 1
 	local high = #events + 1
 	while low < high do
@@ -283,13 +282,13 @@ local function eventRangeAt(sequence: Sequence, localTimePosition: number): (num
 	return first, after - 1
 end
 
-local function getEvent(sequence: Sequence, index: number): CompiledEvent
+local function getEvent(sequence: Sequence, index: number): StoredEvent
 	local event = asSequenceImpl(sequence)._events[index]
 	assert(event ~= nil, "Pulse event index is out of bounds")
 	return event
 end
 
-local function getUpdates(sequence: Sequence): { CompiledUpdate }
+local function getUpdates(sequence: Sequence): { StoredUpdate }
 	return asSequenceImpl(sequence)._updates
 end
 
@@ -297,7 +296,7 @@ local function getOnPlay(sequence: Sequence): EventCallback?
 	return asSequenceImpl(sequence)._onPlay
 end
 
-local function getOnLoop(sequence: Sequence): ((PlaybackContext, LoopChange) -> ())?
+local function getOnLoop(sequence: Sequence): LoopCallback?
 	return asSequenceImpl(sequence)._onLoop
 end
 

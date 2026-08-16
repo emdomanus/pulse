@@ -9,9 +9,10 @@
 </div>
 
 A Playback is one live traversal of a reusable
-[`Sequence`](./sequence.md#sequence) through a
+[`Sequence<ContextT>`](./sequence.md#sequence) through a
 [`TemporalAdapter`](../managers/temporalAdapter.md#temporal-adapter). Construction is inert; call
-[`play`](#playback-play) after registering observers.
+[`play`](#playback-play) after registering observers. The constructor also receives the exact
+per-play context delivered to every authored callback.
 
 <a id="playback-options"></a>
 ## PlaybackOptions
@@ -119,15 +120,21 @@ type Playback = PlaybackContext & {
 ## Pulse.playback
 
 ```luau
-Pulse.playback(
-	sequence: Sequence,
+Pulse.playback<ContextT>(
+	sequence: Sequence<ContextT>,
 	adapter: TemporalAdapter,
+	context: ContextT,
 	options: PlaybackOptions?
 ) -> Playback
 ```
 
-Creates an idle Playback. It does not read, attach to, or schedule against the clock until
-`Playback:play`. An invalid initial speed or address raises during construction.
+Creates an idle Playback and retains `context` for its authored callbacks. The generic Sequence
+type requires the matching context shape at analysis time. Pulse does not clone or interpret the
+context; the host owns any objects and capabilities it contains. Pulse releases its retained
+reference after terminal cleanup and before Ended observers run.
+
+Construction does not read, attach to, or schedule against the clock until `Playback:play`. An
+invalid initial speed or address raises during construction.
 
 <a id="playback-play"></a>
 ### Playback:play
@@ -139,6 +146,9 @@ Playback:play() -> Playback
 Starts an idle Playback, attaches to the adapter, opens the first setup/cleanup generation, and
 reconstructs authored events from the current loop's zero boundary to the initial position. It then
 schedules the next boundary and joins continuous execution only if update work requires it.
+
+For a non-looping zero-duration Sequence, `onPlay` and time-zero events run during this call, then
+the Playback completes, drains cleanup, and emits Ended synchronously without scheduling.
 
 Calling `play` after the Playback has left `idle` is an idempotent no-op. A terminal Playback cannot
 be replayed; construct another Playback from the same Sequence.

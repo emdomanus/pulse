@@ -2,25 +2,33 @@
 
 ## Compile a sequence
 
-Use the builder for handwritten timelines:
+Use the builder for handwritten timelines. Give it the per-play context type expected by authored
+callbacks:
 
 ```luau
-local sequence = Pulse.builder()
+type PresentationContext = {
+	character: Model,
+	worldPosition: Vector3,
+	camera: Camera,
+}
+
+local builder: Pulse.Builder<PresentationContext> = Pulse.builder()
+local sequence = builder
 	:duration(1.2)
 	:event({
 		time = 0.15,
-		run = function(playback)
-			spawnHitEffect()
+		run = function(playback, context)
+			spawnHitEffect(context.character, context.worldPosition)
 		end,
-		reverse = function(playback)
-			removeHitEffect()
+		reverse = function(playback, context)
+			removeHitEffect(context.character)
 		end,
 	})
 	:update({
 		startTime = 0.2,
 		endTime = 0.8,
-		run = function(playback, dt, timePosition)
-			updateTrail(dt, timePosition)
+		run = function(playback, dt, timePosition, context)
+			updateTrail(context.character, dt, timePosition)
 		end,
 	})
 	:compile()
@@ -49,7 +57,13 @@ so updating playbacks share continuous execution.
 ## Create and play
 
 ```luau
-local playback = Pulse.playback(sequence, adapter, {
+local context: PresentationContext = {
+	character = character,
+	worldPosition = targetPosition,
+	camera = workspace.CurrentCamera,
+}
+
+local playback = Pulse.playback(sequence, adapter, context, {
 	playbackSpeed = 1,
 	position = { timePosition = 0 },
 })
@@ -64,6 +78,10 @@ playback:play()
 Construction does not start playback. Register observers first, then call `play`; synchronous
 completion or failure cannot be missed. A Playback instance has one lifecycle. Create another
 Playback from the same Sequence to run it again independently.
+
+The context argument is required even when its intentional value is `nil`. Its type is tied to the
+compiled Sequence, so one presentation definition remains reusable while each invocation receives
+its own character, position, camera, audio commands, or other host-owned data.
 
 ## Control a live playback
 
@@ -87,3 +105,9 @@ adapter:destroy()
 
 Cancel or destroy live playbacks when their owning feature ends. Destroy the adapter when the host
 composition no longer uses that clock/phase pair. Adapter destruction does not destroy the clock.
+
+## Instantaneous sequences
+
+A non-looping Sequence may have `duration = 0`. Its `onPlay` and time-zero events run synchronously
+inside `Playback:play`, then cleanup and Ended run without scheduling a task or phase binding.
+Zero-duration Sequences cannot loop or contain a valid update interval.

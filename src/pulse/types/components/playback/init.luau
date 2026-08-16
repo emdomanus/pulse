@@ -15,7 +15,7 @@ type PlaybackPosition = DefTypes.PlaybackPosition
 type ReachedCallback = TemporalAdapterTypes.ReachedCallback
 type Release = DefTypes.Release
 type ScheduledTaskId = TemporalAdapterTypes.ScheduledTaskId
-type Sequence = SequenceTypes.Sequence
+type StoredSequence = SequenceTypes.StoredSequence
 type SequenceAddress = DefTypes.SequenceAddress
 type SequenceBoundary = SequenceTypes.SequenceBoundary
 type Status = DefTypes.Status
@@ -110,7 +110,8 @@ export type Playback = PlaybackContext & {
 }
 
 export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackSink & {
-	_sequence: Sequence,
+	_sequence: StoredSequence,
+	_context: unknown,
 	_adapter: TemporalAdapter,
 	_status: Status,
 	_completion: Completion?,

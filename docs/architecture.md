@@ -3,7 +3,7 @@
 Pulse has three runtime roles and one authoring helper.
 
 ```text
-SequenceDefinition -> Builder/compiler -> immutable Sequence
+SequenceDefinition<ContextT> -> Builder/compiler -> immutable Sequence<ContextT>
                                               |
 ProviderClock -> TemporalAdapter ----------> Playback -> authored callbacks
 ```
@@ -12,8 +12,8 @@ ProviderClock -> TemporalAdapter ----------> Playback -> authored callbacks
 
 | Role | Owns | Does not own |
 | --- | --- | --- |
-| `Sequence` | Validated immutable event, update, loop, and discontinuity policy | Clock state or live playback lifecycle |
-| `Playback` | Anchors, traversal cursor, local speed, scheduling intent, cleanup generation, completion | Clock or phase binding lifetime outside its adapter attachment |
+| `Sequence<ContextT>` | Validated immutable callbacks, update, loop, and discontinuity policy | Invocation context, clock state, or live playback lifecycle |
+| `Playback` | Per-play context, anchors, traversal cursor, local speed, scheduling intent, cleanup generation, completion | Clock or phase binding lifetime outside its adapter attachment |
 | `TemporalAdapter` | Borrowed-clock validation, attachments, one changed subscription, one lazy shared phase binding | The provider clock or authored side effects |
 | Host | Provider clock, execution phase, direction tokens, domain context and side effects | Sequence traversal internals |
 
@@ -54,6 +54,11 @@ discontinuous change uses the sequence's
 Forward traversal calls `Event.run`; backward traversal calls `Event.reverse` when present. Pulse
 reverses traversal and its own recorded cursor, not arbitrary authored side effects. The reverse
 callback owns any domain-specific undo.
+
+`Pulse.playback` receives one typed invocation context and retains it for that Playback. The same
+value is passed to event, reverse, update, setup, and authored loop callbacks, allowing one compiled
+Sequence to serve many characters or world invocations without capturing per-play closures. Pulse
+releases the retained context after terminal cleanup and before publishing Completion.
 
 `Playback:addCleanup` belongs to the current playback or rebuild generation. Cleanup executes in
 reverse registration order on rebuild or terminal completion. It is not per-event rollback.

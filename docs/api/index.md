@@ -18,17 +18,17 @@ local Pulse = require(ReplicatedStorage.packages.pulse)
 
 | Export | Signature | Canonical API |
 | --- | --- | --- |
-| `sequence` | `(SequenceDefinition) -> Sequence` | [`Pulse.sequence`](./components/sequence.md#pulse-sequence) |
-| `builder` | `() -> Builder` | [`Pulse.builder`](./components/builder.md#pulse-builder) |
+| `sequence` | `<C>(SequenceDefinition<C>) -> Sequence<C>` | [`Pulse.sequence`](./components/sequence.md#pulse-sequence) |
+| `builder` | `<C>() -> Builder<C>` | [`Pulse.builder`](./components/builder.md#pulse-builder) |
 | `temporalAdapter` | `<P, D>(ProviderClock<P, D>, P, DirectionTokens<D>) -> TemporalAdapter` | [`Pulse.temporalAdapter`](./managers/temporalAdapter.md#pulse-temporal-adapter) |
-| `playback` | `(Sequence, TemporalAdapter, PlaybackOptions?) -> Playback` | [`Pulse.playback`](./components/playback.md#pulse-playback) |
+| `playback` | `<C>(Sequence<C>, TemporalAdapter, C, PlaybackOptions?) -> Playback` | [`Pulse.playback`](./components/playback.md#pulse-playback) |
 
 ## Returned objects
 
 | Object | Responsibility |
 | --- | --- |
-| [`Sequence`](./components/sequence.md#sequence) | Immutable reusable compiled timeline |
-| [`Builder`](./components/builder.md#builder) | Mutable fluent sequence authoring helper |
+| [`Sequence<ContextT>`](./components/sequence.md#sequence) | Immutable reusable compiled timeline tied to its callback context type |
+| [`Builder<ContextT>`](./components/builder.md#builder) | Mutable fluent sequence authoring helper |
 | [`TemporalAdapter`](./managers/temporalAdapter.md#temporal-adapter) | Borrowed clock/phase composition and shared execution |
 | [`Playback`](./components/playback.md#playback) | One live traversal and lifecycle |
 

@@ -27,6 +27,8 @@ also verify the current Studio harness against Roblox execution:
 - repeated forward and backward loops preserve event and loop ordering;
 - exact-boundary direction changes do not double-run or skip callbacks;
 - repeated structured loop seeks keep the requested `timePosition` and `loopIndex`;
+- per-play context identity reaches event, reverse, update, setup, and loop callbacks;
+- a zero-duration non-looping Sequence completes synchronously without scheduler ownership;
 - pause, resume, speed changes, cancellation, and adapter destruction release ownership.
 
 Package publication and consumer Pesde operations are separate operator actions and are not part of

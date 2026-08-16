@@ -8,39 +8,40 @@ local BuilderModule = require(script.builder)
 local Compiler = require(script.compiler)
 
 type AddressPolicy = DefTypes.AddressPolicy
-type Builder = Types.Builder
-type Sequence = Types.Sequence
-type SequenceDefinition = Types.SequenceDefinition
-type SequenceImpl = Types.SequenceImpl
-type SequenceState = Types.SequenceState
+type Builder<ContextT> = Types.Builder<ContextT>
+type Sequence<ContextT> = Types.Sequence<ContextT>
+type SequenceDefinition<ContextT> = Types.SequenceDefinition<ContextT>
+type SequenceImpl<ContextT> = Types.SequenceImpl<ContextT>
+type SequenceState<ContextT> = Types.SequenceState<ContextT>
+type StoredSequenceImpl = Types.StoredSequenceImpl
 
 type SequenceModule = {
-	new: (definition: SequenceDefinition) -> Sequence,
-	builder: () -> Builder,
+	new: <ContextT>(definition: SequenceDefinition<ContextT>) -> Sequence<ContextT>,
+	builder: <ContextT>() -> Builder<ContextT>,
 }
 
 local Sequence = {}
 Sequence.__index = Sequence
 
-local function ConstructSequence(definition: SequenceDefinition): Sequence
-	local state: SequenceState = Compiler.compile(definition)
-	local self = (setmetatable(state, Sequence) :: unknown) :: SequenceImpl
+local function ConstructSequence<ContextT>(definition: SequenceDefinition<ContextT>): Sequence<ContextT>
+	local state: SequenceState<ContextT> = Compiler.compile(definition)
+	local self = (setmetatable(state, Sequence) :: unknown) :: SequenceImpl<ContextT>
 	return table.freeze(self)
 end
 
-local function ConstructBuilder(): Builder
+local function ConstructBuilder<ContextT>(): Builder<ContextT>
 	return BuilderModule.new(ConstructSequence)
 end
 
-function Sequence.getDuration(self: SequenceImpl): number
+function Sequence.getDuration(self: StoredSequenceImpl): number
 	return self._duration
 end
 
-function Sequence.isLooping(self: SequenceImpl): boolean
+function Sequence.isLooping(self: StoredSequenceImpl): boolean
 	return self._loop
 end
 
-function Sequence.getAddressPolicy(self: SequenceImpl): AddressPolicy
+function Sequence.getAddressPolicy(self: StoredSequenceImpl): AddressPolicy
 	return self._addressPolicy
 end
 

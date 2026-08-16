@@ -1,10 +1,14 @@
 # Pulse Temporal Scheduling Amendment
 
-**Status:** Approved as the execution contract on 2026-08-15 and accelerated
-before implementation. Intermediate migration commits may be broken;
-compatibility and full verification are required only at the final milestone.
-Continuous reverse playback and correctness-first timed-step history retention
-remain accepted for v1.
+**Status:** Implemented and superseded as an active API contract on 2026-08-16. This file remains
+the historical migration and decision record. The canonical current contract is the
+[`Architecture`](../architecture.md) and filesystem-aligned [`API`](../api/index.md).
+
+The final integration amendment adds a required generic per-play context to
+`Pulse.playback(sequence, adapter, context, options?)`; the same typed value reaches event, reverse,
+update, setup, and authored loop callbacks without being stored by the reusable Sequence. Pulse has
+no Tempo package dependency. Non-looping `duration = 0` Sequences are valid event-only timelines
+that complete synchronously without scheduler ownership; looping still requires positive duration.
 
 **Reviewed 2026-08-12 against:** Pulse `1914abf0` (`0.3.0`), Tempo
 `7452b56c` (`0.4.0`), and VoxelMMO TemporalService at the current ServiceDev

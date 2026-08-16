@@ -11,12 +11,17 @@ meaning and side effects of callbacks.
 local Pulse = require(ReplicatedStorage.packages.pulse)
 local Tempo = require(ReplicatedStorage.packages.tempo)
 
-local sequence = Pulse.builder()
+type HitContext = {
+	worldPosition: Vector3,
+}
+
+local builder: Pulse.Builder<HitContext> = Pulse.builder()
+local sequence = builder
 	:duration(1.5)
 	:event({
 		time = 0.2,
-		run = function(playback)
-			print("hit", playback:getPosition().timePosition)
+		run = function(playback, context)
+			print("hit", context.worldPosition, playback:getPosition().timePosition)
 		end,
 	})
 	:compile()
@@ -26,12 +31,17 @@ local adapter = Pulse.temporalAdapter(clock, runtime.phases.heartbeat, {
 	backward = Tempo.Enums.Direction.backward,
 })
 
-local playback = Pulse.playback(sequence, adapter)
+local playback = Pulse.playback(sequence, adapter, {
+	worldPosition = targetPosition,
+})
 playback:play()
 ```
 
 One `TemporalAdapter` may serve many playbacks. Event-only playbacks schedule only their next
 boundary. Updating playbacks lazily share the adapter's single phase binding.
+
+Pulse has no package dependency on Tempo. A Tempo Clock is one structural provider that a host may
+inject; another scheduling-capable clock can satisfy the same public contract.
 
 ## Development
 

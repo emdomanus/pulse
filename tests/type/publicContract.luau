@@ -49,22 +49,29 @@ type Provider = {
 	bindPhase: (self: Provider, phase: Phase, callback: (clockDt: number, now: number) -> ()) -> Pulse.Release,
 }
 
+type InvocationContext = {
+	actorId: number,
+	worldPosition: Vector3,
+}
+
 local function provePublicContract(
 	provider: Provider,
 	directions: Pulse.DirectionTokens<DirectionToken>
 ): Pulse.Completion?
 	local structuralProvider: Pulse.ProviderClock<Phase, DirectionToken> = provider
 	local adapter = Pulse.temporalAdapter(structuralProvider, "presentation", directions)
-	local definition: Pulse.SequenceDefinition = {
+	local definition: Pulse.SequenceDefinition<InvocationContext> = {
 		duration = 2,
 		addressPolicy = "rebuild",
 		events = {
 			{
 				time = 1,
-				run = function(playback: Pulse.PlaybackContext)
+				run = function(playback: Pulse.PlaybackContext, context: InvocationContext)
+					local _actorId: number = context.actorId
 					playback:addCleanup(function() end)
 				end,
-				reverse = function(playback: Pulse.PlaybackContext)
+				reverse = function(playback: Pulse.PlaybackContext, context: InvocationContext)
+					local _worldPosition: Vector3 = context.worldPosition
 					local address: Pulse.SequenceAddress = { timePosition = 0 }
 					playback:seek(address)
 				end,
@@ -74,16 +81,25 @@ local function provePublicContract(
 			{
 				startTime = 0,
 				endTime = 2,
-				run = function(playback: Pulse.PlaybackContext, clockDt: number, timePosition: number)
+				run = function(
+					playback: Pulse.PlaybackContext,
+					clockDt: number,
+					timePosition: number,
+					context: InvocationContext
+				)
 					local _status: Pulse.Status = playback:getStatus()
 					local _delta: number = clockDt
 					local _position: number = timePosition
+					local _actorId: number = context.actorId
 				end,
 			},
 		},
 	}
 	local sequence = Pulse.sequence(definition)
 	local playback: Pulse.Playback = Pulse.playback(sequence, adapter, {
+		actorId = 42,
+		worldPosition = Vector3.zero,
+	}, {
 		playbackSpeed = 1,
 		position = { timePosition = 0 },
 	})
@@ -103,20 +119,21 @@ local function provePublicContract(
 	return playback:getCompletion()
 end
 
-local function proveBuilderContract(): Pulse.Sequence
-	return Pulse.builder()
+local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
+	local builder: Pulse.Builder<InvocationContext> = Pulse.builder()
+	return builder
 		:duration(1)
 		:loop()
 		:addressPolicy("skip")
 		:event({
 			time = 0.5,
-			run = function() end,
+			run = function(_playback, _context) end,
 		})
 		:update({
-			run = function() end,
+			run = function(_playback, _dt, _timePosition, _context) end,
 		})
-		:onPlay(function() end)
-		:onLoop(function(_playback, _change) end)
+		:onPlay(function(_playback, _context) end)
+		:onLoop(function(_playback, _change, _context) end)
 		:compile()
 end
 

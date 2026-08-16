@@ -1,8 +1,8 @@
 # Tempo Integration
 
-A current Tempo `Clock` structurally satisfies Pulse's provider contract. Pulse does not accept a
-Tempo runtime or service object; the composition root supplies the clock, phase, and direction
-tokens.
+A current Tempo `Clock` structurally satisfies Pulse's provider contract. Pulse has no Tempo package
+dependency and does not accept a Tempo runtime or service object; the composition root supplies the
+clock, phase, and direction tokens.
 
 ```luau
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,8 +24,8 @@ another standalone consumer may choose heartbeat.
 ## Share the adapter
 
 ```luau
-local hit = Pulse.playback(hitSequence, adapter)
-local trail = Pulse.playback(trailSequence, adapter)
+local hit = Pulse.playback(hitSequence, adapter, hitContext)
+local trail = Pulse.playback(trailSequence, adapter, trailContext)
 
 hit:play()
 trail:play()

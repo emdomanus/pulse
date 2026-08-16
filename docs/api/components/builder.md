@@ -11,15 +11,18 @@
 ## Builder
 
 ```luau
-type Builder = {
-	duration: (self: Builder, seconds: number) -> Builder,
-	loop: (self: Builder, enabled: boolean?) -> Builder,
-	addressPolicy: (self: Builder, policy: AddressPolicy) -> Builder,
-	event: (self: Builder, event: Event) -> Builder,
-	update: (self: Builder, update: Update) -> Builder,
-	onPlay: (self: Builder, callback: (PlaybackContext) -> ()) -> Builder,
-	onLoop: (self: Builder, callback: (PlaybackContext, LoopChange) -> ()) -> Builder,
-	compile: (self: Builder) -> Sequence,
+type Builder<ContextT> = {
+	duration: (self: Builder<ContextT>, seconds: number) -> Builder<ContextT>,
+	loop: (self: Builder<ContextT>, enabled: boolean?) -> Builder<ContextT>,
+	addressPolicy: (self: Builder<ContextT>, policy: AddressPolicy) -> Builder<ContextT>,
+	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
+	update: (self: Builder<ContextT>, update: Update<ContextT>) -> Builder<ContextT>,
+	onPlay: (self: Builder<ContextT>, callback: (PlaybackContext, ContextT) -> ()) -> Builder<ContextT>,
+	onLoop: (
+		self: Builder<ContextT>,
+		callback: (PlaybackContext, LoopChange, ContextT) -> ()
+	) -> Builder<ContextT>,
+	compile: (self: Builder<ContextT>) -> Sequence<ContextT>,
 }
 ```
 
@@ -27,7 +30,7 @@ type Builder = {
 
 | Method | Description |
 | --- | --- |
-| [`duration`](#builder-duration) | Sets the required positive duration |
+| [`duration`](#builder-duration) | Sets the required nonnegative duration |
 | [`loop`](#builder-loop) | Enables or disables looping |
 | [`addressPolicy`](#builder-address-policy) | Selects `skip`, `rebuild`, or `cancel` |
 | [`event`](#builder-event) | Appends one event |
@@ -40,25 +43,31 @@ type Builder = {
 ## Pulse.builder
 
 ```luau
-Pulse.builder() -> Builder
+Pulse.builder<ContextT>() -> Builder<ContextT>
 ```
 
 Creates an empty builder. The default address policy is `skip`; looping defaults to `false`.
+Luau infers a parameterless generic constructor from its expected type:
+
+```luau
+local builder: Pulse.Builder<PresentationContext> = Pulse.builder()
+```
 
 <a id="builder-duration"></a>
 ### Builder:duration
 
 ```luau
-Builder:duration(seconds: number) -> Builder
+Builder<ContextT>:duration(seconds: number) -> Builder<ContextT>
 ```
 
-Sets the required sequence duration and returns the same Builder.
+Sets the required sequence duration and returns the same Builder. Zero is valid only for a
+non-looping Sequence.
 
 <a id="builder-loop"></a>
 ### Builder:loop
 
 ```luau
-Builder:loop(enabled: boolean?) -> Builder
+Builder<ContextT>:loop(enabled: boolean?) -> Builder<ContextT>
 ```
 
 Enables looping when omitted or `true`, and disables it when `false`.
@@ -67,7 +76,7 @@ Enables looping when omitted or `true`, and disables it when `false`.
 ### Builder:addressPolicy
 
 ```luau
-Builder:addressPolicy(policy: AddressPolicy) -> Builder
+Builder<ContextT>:addressPolicy(policy: AddressPolicy) -> Builder<ContextT>
 ```
 
 Sets the policy for Playback seeks and discontinuous clock changes.
@@ -76,7 +85,7 @@ Sets the policy for Playback seeks and discontinuous clock changes.
 ### Builder:event
 
 ```luau
-Builder:event(event: Event) -> Builder
+Builder<ContextT>:event(event: Event<ContextT>) -> Builder<ContextT>
 ```
 
 Copies and appends an event. Compilation preserves authored order for equal times.
@@ -85,7 +94,7 @@ Copies and appends an event. Compilation preserves authored order for equal time
 ### Builder:update
 
 ```luau
-Builder:update(update: Update) -> Builder
+Builder<ContextT>:update(update: Update<ContextT>) -> Builder<ContextT>
 ```
 
 Copies and appends a continuous update interval.
@@ -94,7 +103,7 @@ Copies and appends a continuous update interval.
 ### Builder:onPlay
 
 ```luau
-Builder:onPlay(callback: (PlaybackContext) -> ()) -> Builder
+Builder<ContextT>:onPlay(callback: (PlaybackContext, ContextT) -> ()) -> Builder<ContextT>
 ```
 
 Sets the callback that opens each initial or rebuilt generation.
@@ -103,7 +112,9 @@ Sets the callback that opens each initial or rebuilt generation.
 ### Builder:onLoop
 
 ```luau
-Builder:onLoop(callback: (PlaybackContext, LoopChange) -> ()) -> Builder
+Builder<ContextT>:onLoop(
+	callback: (PlaybackContext, LoopChange, ContextT) -> ()
+) -> Builder<ContextT>
 ```
 
 Sets the authored loop callback. It runs before callbacks registered with `Playback:onLooped`.
@@ -112,7 +123,7 @@ Sets the authored loop callback. It runs before callbacks registered with `Playb
 ### Builder:compile
 
 ```luau
-Builder:compile() -> Sequence
+Builder<ContextT>:compile() -> Sequence<ContextT>
 ```
 
 Validates the accumulated definition and returns a frozen reusable Sequence. The Builder remains a

@@ -28,7 +28,8 @@ type PlaybackPosition = DefTypes.PlaybackPosition
 type PlaybackSink = TemporalAdapterTypes.PlaybackSink
 type SequenceAddress = DefTypes.SequenceAddress
 type SequenceBoundary = SequenceTypes.SequenceBoundary
-type SequenceType = SequenceTypes.Sequence
+type Sequence<ContextT> = SequenceTypes.Sequence<ContextT>
+type StoredSequence = SequenceTypes.StoredSequence
 type Status = DefTypes.Status
 type TemporalAdapterType = TemporalAdapterTypes.TemporalAdapter
 type TerminalRequest = PlaybackTypes.TerminalRequest
@@ -36,7 +37,12 @@ type TerminalStatus = DefTypes.TerminalStatus
 type TraversalDirection = DefTypes.TraversalDirection
 
 type PlaybackModule = {
-	new: (sequence: SequenceType, adapter: TemporalAdapterType, options: PlaybackOptions?) -> Playback,
+	new: <ContextT>(
+		sequence: Sequence<ContextT>,
+		adapter: TemporalAdapterType,
+		context: ContextT,
+		options: PlaybackOptions?
+	) -> Playback,
 }
 
 local MAX_RECONCILIATION_WORK = 4_096
@@ -166,6 +172,7 @@ local function finish(self: PlaybackImpl, status: TerminalStatus, reason: string
 		status = "failed"
 		reason = "cleanupFailed"
 	end
+	self._context = nil
 	local completion: Completion = table.freeze({
 		status = status,
 		reason = reason,
@@ -194,13 +201,13 @@ end
 
 -- Event and boundary traversal
 
-local function invokeEvent(self: PlaybackImpl, callback: (PlaybackContext) -> ()): boolean
+local function invokeEvent(self: PlaybackImpl, callback: (PlaybackContext, unknown) -> ()): boolean
 	self._workCount += 1
 	if self._workCount > MAX_RECONCILIATION_WORK then
 		requestTerminal(self, "failed", "catchUpLimitExceeded")
 		return false
 	end
-	if not pcall(callback, asAttachment(self)) then
+	if not pcall(callback, asAttachment(self), self._context) then
 		requestTerminal(self, "failed", "callbackFailed")
 		return false
 	end
@@ -215,7 +222,7 @@ local function emitLoop(self: PlaybackImpl, change: LoopChange): boolean
 		return false
 	end
 	local authored = SequenceRuntime.getOnLoop(self._sequence)
-	if authored ~= nil and not pcall(authored, asAttachment(self), immutableChange) then
+	if authored ~= nil and not pcall(authored, asAttachment(self), immutableChange, self._context) then
 		requestTerminal(self, "failed", "callbackFailed")
 		return false
 	end
@@ -861,7 +868,7 @@ runPhaseUpdates = function(self: PlaybackImpl, fromPosition: number, toPosition:
 					requestTerminal(self, "failed", "catchUpLimitExceeded")
 					return
 				end
-				if not pcall(update.run, asAttachment(self), overlap, localNow) then
+				if not pcall(update.run, asAttachment(self), overlap, localNow, self._context) then
 					requestTerminal(self, "failed", "callbackFailed")
 					return
 				end
@@ -1063,15 +1070,17 @@ end
 
 -- Construction and public methods
 
-local function ConstructPlayback(
-	sequence: SequenceType,
+local function ConstructPlayback<ContextT>(
+	sequence: Sequence<ContextT>,
 	adapter: TemporalAdapterType,
+	context: ContextT,
 	options: PlaybackOptions?
 ): Playback
 	local config: PlaybackOptions = options or {}
 	local speed = config.playbackSpeed or 1
 	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
-	local initial = SequenceRuntime.validateAddress(sequence, config.position or { timePosition = 0 })
+	local storedSequence = (sequence :: unknown) :: StoredSequence
+	local initial = SequenceRuntime.validateAddress(storedSequence, config.position or { timePosition = 0 })
 	local self: PlaybackImpl
 	local function reachedCallback(_now: number, _direction: unknown)
 		local sample, clockSerial = snapshotClock(self)
@@ -1085,7 +1094,8 @@ local function ConstructPlayback(
 	end
 	self = (
 		setmetatable({
-			_sequence = sequence,
+			_sequence = storedSequence,
+			_context = context,
 			_adapter = adapter,
 			_status = "idle" :: Status,
 			_completion = nil,
@@ -1143,6 +1153,9 @@ function Playback.play(self: PlaybackImpl): Playback
 	self._busy = true
 	self._workCount = 0
 	reconstructTo(self, self._initialPosition, false)
+	if self._terminalRequest == nil and self._sequence:getDuration() == 0 then
+		requestTerminal(self, "completed", nil)
+	end
 	if self._terminalRequest == nil then
 		reanchor(self, sample)
 		refreshOwnership(self, false)
