@@ -17,6 +17,7 @@ type Release = DefTypes.Release
 type ScheduledTaskId = TemporalAdapterTypes.ScheduledTaskId
 type Sequence = SequenceTypes.Sequence
 type SequenceAddress = DefTypes.SequenceAddress
+type SequenceBoundary = SequenceTypes.SequenceBoundary
 type Status = DefTypes.Status
 type TemporalAdapter = TemporalAdapterTypes.TemporalAdapter
 type TerminalStatus = DefTypes.TerminalStatus
@@ -117,13 +118,13 @@ export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackSink & {
 	_anchorClock: number,
 	_anchorSequence: number,
 	_clockRate: number,
-	_position: number,
-	_initialPosition: number,
+	_position: PlaybackPosition,
+	_initialPosition: PlaybackPosition,
 	_boundaryState: BoundaryState?,
 	_direction: TraversalDirection?,
 	_scheduledId: ScheduledTaskId?,
 	_scheduledDirection: TraversalDirection?,
-	_scheduledBoundary: number?,
+	_scheduledBoundary: SequenceBoundary?,
 	_attached: boolean,
 	_updating: boolean,
 	_updateCursor: number,

@@ -38,6 +38,12 @@ export type CompiledUpdate = {
 	run: UpdateCallback,
 }
 
+export type SequenceBoundary = {
+	timePosition: number,
+	loopIndex: number,
+	unwrappedTimePosition: number,
+}
+
 export type SequenceDefinition = {
 	duration: number,
 	loop: boolean?,

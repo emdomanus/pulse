@@ -22,6 +22,11 @@ type FakeClock = {
 		forward: DirectionToken,
 		backward: DirectionToken,
 	},
+	read: (self: FakeClock) -> {
+		timePosition: number,
+		rate: number,
+		revision: number,
+	},
 	stepRootTo: (self: FakeClock, rootTime: number, phase: string) -> (),
 	advanceRootTo: (self: FakeClock, rootTime: number) -> (),
 	evaluatePhase: (self: FakeClock, phase: string) -> (),
@@ -752,6 +757,318 @@ Harness.test("loop boundaries order end, loop, then next start", function()
 	observerPlayback:cancel()
 end)
 
+Harness.test("missed twenty-loop catch-up preserves authored boundaries forward and backward", function()
+	local forwardClock = FakeClock.new()
+	local forwardOrder: { string } = {}
+	local forwardCoordinates: { number } = {}
+	local reverseOrder: { string } = {}
+	local forwardLoops = 0
+	local reverseLoops = 0
+	local function event(time: number, label: string): Event
+		return {
+			time = time,
+			run = function(context)
+				local position = context:getPosition()
+				Harness.assertEqual(position.timePosition, time)
+				table.insert(forwardOrder, `{label}@{position.loopIndex}`)
+				table.insert(forwardCoordinates, position.unwrappedTimePosition)
+			end,
+			reverse = function(context)
+				local position = context:getPosition()
+				Harness.assertEqual(position.timePosition, time)
+				table.insert(reverseOrder, `{label}@{position.loopIndex}`)
+			end,
+		}
+	end
+	local definition: Definition = {
+		duration = 6,
+		loop = true,
+		events = {
+			event(0.8, "a"),
+			event(2.4, "b"),
+			event(4.6, "c"),
+		},
+		onLoop = function(_context, rawChange)
+			local change = rawChange :: {
+				direction: "forward" | "backward",
+			}
+			if change.direction == "forward" then
+				forwardLoops += 1
+			else
+				reverseLoops += 1
+			end
+		end,
+	}
+	local forward = createPlayback(forwardClock, definition)
+	forward:play()
+	forwardClock:advanceRootTo(120.8)
+	forwardClock:evaluatePhase(PHASE)
+	local expectedForward: { string } = {}
+	for loopIndex = 0, 19 do
+		table.insert(expectedForward, `a@{loopIndex}`)
+		table.insert(expectedForward, `b@{loopIndex}`)
+		table.insert(expectedForward, `c@{loopIndex}`)
+	end
+	table.insert(expectedForward, "a@20")
+	Harness.assertArrayEqual(forwardOrder, expectedForward)
+	Harness.assertEqual(forwardCoordinates[7], 12.8)
+	Harness.assertEqual(forwardCoordinates[10], 18.8)
+	Harness.assertEqual(forwardCoordinates[61], 120.8)
+	Harness.assertEqual(forwardLoops, 20)
+	Harness.assertEqual(forward:getPosition().timePosition, 0.8)
+	Harness.assertEqual(forward:getPosition().loopIndex, 20)
+	Harness.assertTrue(forward:isAlive())
+	Harness.assertEqual(forwardClock:getTaskCount(), 1)
+	Harness.assertEqual(forwardClock:getPhaseBindingCount(), 0)
+
+	local reverseClock = FakeClock.new()
+	local reverse = createPlayback(reverseClock, definition, {
+		playbackSpeed = -1,
+		position = { timePosition = 0, loopIndex = 20 },
+	})
+	reverse:play()
+	reverseClock:advanceRootTo(119.2)
+	reverseClock:evaluatePhase(PHASE)
+	local expectedReverse: { string } = {}
+	for loopIndex = 19, 0, -1 do
+		table.insert(expectedReverse, `c@{loopIndex}`)
+		table.insert(expectedReverse, `b@{loopIndex}`)
+		table.insert(expectedReverse, `a@{loopIndex}`)
+	end
+	Harness.assertArrayEqual(reverseOrder, expectedReverse)
+	Harness.assertEqual(reverseLoops, 20)
+	Harness.assertNear(reverse:getPosition().timePosition, 0.8)
+	Harness.assertEqual(reverse:getPosition().loopIndex, 0)
+	Harness.assertTrue(reverse:isAlive())
+	Harness.assertEqual(reverseClock:getTaskCount(), 1)
+	Harness.assertEqual(reverseClock:getPhaseBindingCount(), 0)
+end)
+
+Harness.test("direction pivots apply exact event and loop boundaries once", function()
+	local eventClock = FakeClock.new()
+	local eventOrder: { string } = {}
+	local eventPlayback = createPlayback(eventClock, {
+		duration = 6,
+		loop = true,
+		events = {
+			{
+				time = 0.8,
+				run = function(context)
+					Harness.assertEqual(context:getPosition().timePosition, 0.8)
+					table.insert(eventOrder, "forward")
+				end,
+				reverse = function(context)
+					Harness.assertEqual(context:getPosition().timePosition, 0.8)
+					table.insert(eventOrder, "backward")
+				end,
+			},
+		},
+	})
+	eventPlayback:play()
+	eventClock:stepRootTo(0.8, PHASE)
+	eventClock:setRate(-1)
+	eventClock:setRate(1)
+	Harness.assertArrayEqual(eventOrder, { "forward", "backward", "forward" })
+	Harness.assertEqual(eventPlayback:getPosition().timePosition, 0.8)
+	Harness.assertEqual(eventClock:getTaskCount(), 1)
+
+	local loopClock = FakeClock.new()
+	local loopOrder: { string } = {}
+	local loopPlayback = createPlayback(loopClock, {
+		duration = 6,
+		loop = true,
+		events = {
+			{
+				time = 0,
+				run = function(context)
+					Harness.assertEqual(context:getPosition().timePosition, 0)
+					table.insert(loopOrder, "zeroForward")
+				end,
+				reverse = function(context)
+					Harness.assertEqual(context:getPosition().timePosition, 0)
+					table.insert(loopOrder, "zeroBackward")
+				end,
+			},
+			{
+				time = 6,
+				run = function(context)
+					Harness.assertEqual(context:getPosition().timePosition, 6)
+					table.insert(loopOrder, "durationForward")
+				end,
+				reverse = function(context)
+					Harness.assertEqual(context:getPosition().timePosition, 6)
+					table.insert(loopOrder, "durationBackward")
+				end,
+			},
+		},
+		onLoop = function(context, rawChange)
+			local change = rawChange :: {
+				direction: "forward" | "backward",
+			}
+			if change.direction == "forward" then
+				Harness.assertEqual(context:getPosition().timePosition, 6)
+				Harness.assertEqual(context:getPosition().loopIndex, 0)
+			else
+				Harness.assertEqual(context:getPosition().timePosition, 0)
+				Harness.assertEqual(context:getPosition().loopIndex, 1)
+			end
+			table.insert(loopOrder, `authored{change.direction}`)
+		end,
+	})
+	loopPlayback:onLooped(function(change)
+		table.insert(loopOrder, `observed{change.direction}`)
+	end)
+	loopPlayback:play()
+	loopClock:stepRootTo(6, PHASE)
+	loopClock:setRate(-1)
+	loopClock:setRate(1)
+	Harness.assertArrayEqual(loopOrder, {
+		"zeroForward",
+		"durationForward",
+		"authoredforward",
+		"observedforward",
+		"zeroForward",
+		"zeroBackward",
+		"authoredbackward",
+		"observedbackward",
+		"durationBackward",
+		"durationForward",
+		"authoredforward",
+		"observedforward",
+		"zeroForward",
+	})
+	Harness.assertEqual(loopPlayback:getPosition().timePosition, 0)
+	Harness.assertEqual(loopPlayback:getPosition().loopIndex, 1)
+	Harness.assertEqual(loopClock:getTaskCount(), 1)
+	Harness.assertEqual(loopClock:getPhaseBindingCount(), 0)
+end)
+
+Harness.test("public Loop +1 rebuild seeks retain local position and target-loop provenance", function()
+	local clock = FakeClock.new()
+	local setups = 0
+	local cleanups = 0
+	local replayOrder: { string } = {}
+	local function event(time: number, label: string): Event
+		return {
+			time = time,
+			run = function(context)
+				local position = context:getPosition()
+				Harness.assertEqual(position.timePosition, time)
+				table.insert(replayOrder, `{label}@{position.loopIndex}`)
+			end,
+		}
+	end
+	local playback = createPlayback(clock, {
+		duration = 6,
+		loop = true,
+		addressPolicy = "rebuild",
+		events = {
+			event(0.8, "a"),
+			event(2.4, "b"),
+			event(4.6, "c"),
+		},
+		onPlay = function(context)
+			setups += 1
+			context:addCleanup(function()
+				cleanups += 1
+			end)
+		end,
+	})
+	playback:play()
+	local function seek(timePosition: number, loopIndex: number)
+		Harness.assertTrue(playback:seek({
+			timePosition = timePosition,
+			loopIndex = loopIndex,
+		}))
+		local position = playback:getPosition()
+		Harness.assertEqual(position.timePosition, timePosition)
+		Harness.assertEqual(position.loopIndex, loopIndex)
+	end
+	local function loopPlusOne()
+		local position = playback:getPosition()
+		seek(position.timePosition, position.loopIndex + 1)
+	end
+
+	seek(0.8, 0)
+	for _ = 1, 5 do
+		loopPlusOne()
+	end
+	seek(1.1, 5)
+	loopPlusOne()
+	seek(0, 6)
+	loopPlusOne()
+	seek(5.9, 7)
+	loopPlusOne()
+	Harness.assertArrayEqual(replayOrder, {
+		"a@0",
+		"a@1",
+		"a@2",
+		"a@3",
+		"a@4",
+		"a@5",
+		"a@5",
+		"a@6",
+		"a@7",
+		"b@7",
+		"c@7",
+		"a@8",
+		"b@8",
+		"c@8",
+	})
+	Harness.assertEqual(setups, 13)
+	Harness.assertEqual(cleanups, 12)
+	Harness.assertEqual(playback:getPosition().timePosition, 5.9)
+	Harness.assertEqual(playback:getPosition().loopIndex, 8)
+	Harness.assertEqual(clock:read().timePosition, 0)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+	playback:cancel()
+	Harness.assertEqual(cleanups, 13)
+end)
+
+Harness.test("looping updates share phase execution across three complete loops", function()
+	local clock = FakeClock.new()
+	local adapter = adapterFor(clock)
+	local positiveDelta = 0
+	local zeroSamples = 0
+	local sequence = Pulse.sequence({
+		duration = 6,
+		loop = true,
+		updates = {
+			{
+				startTime = 0,
+				endTime = 6,
+				run = function(_context, dt)
+					if dt == 0 then
+						zeroSamples += 1
+					else
+						positiveDelta += dt
+					end
+				end,
+			},
+		},
+	})
+	local first = Pulse.playback(sequence, adapter)
+	local second = Pulse.playback(sequence, adapter)
+	first:play()
+	second:play()
+	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	clock:advanceRootTo(18.25)
+	clock:evaluatePhase(PHASE)
+	Harness.assertNear(positiveDelta, 36.5)
+	Harness.assertEqual(zeroSamples, 2)
+	Harness.assertEqual(first:getPosition().loopIndex, 3)
+	Harness.assertEqual(second:getPosition().loopIndex, 3)
+	Harness.assertEqual(first:getPosition().timePosition, 0.25)
+	Harness.assertEqual(second:getPosition().timePosition, 0.25)
+	Harness.assertEqual(clock:getTaskCount(), 2)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	first:cancel()
+	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	second:cancel()
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+end)
+
 Harness.test("pause and resume discard paused clock movement", function()
 	local clock = FakeClock.new()
 	local hits = 0
@@ -1042,6 +1359,29 @@ Harness.test("manual seek uses the sequence discontinuity policy", function()
 	direction:cancel()
 end)
 
+Harness.test("structured loop seeks retain the requested boundary side", function()
+	local clock = FakeClock.new()
+	local playback = createPlayback(clock, {
+		duration = 6,
+		loop = true,
+		addressPolicy = "skip",
+	})
+	playback:play()
+	Harness.assertTrue(playback:seek({ timePosition = 6, loopIndex = 2 }))
+	local durationSide = playback:getPosition()
+	Harness.assertEqual(durationSide.timePosition, 6)
+	Harness.assertEqual(durationSide.loopIndex, 2)
+	Harness.assertEqual(durationSide.unwrappedTimePosition, 18)
+	Harness.assertTrue(playback:seek({ timePosition = 0, loopIndex = 3 }))
+	local zeroSide = playback:getPosition()
+	Harness.assertEqual(zeroSide.timePosition, 0)
+	Harness.assertEqual(zeroSide.loopIndex, 3)
+	Harness.assertEqual(zeroSide.unwrappedTimePosition, 18)
+	Harness.assertEqual(clock:read().timePosition, 0)
+	Harness.assertEqual(clock:getTaskCount(), 1)
+	playback:cancel()
+end)
+
 Harness.test("terminal callback mutation interrupts equal-time work", function()
 	local clock = FakeClock.new()
 	local order: { string } = {}
@@ -1274,7 +1614,7 @@ Harness.test("cancel, destroy, and adapter destruction release all ownership", f
 	Harness.assertTrue(detachedAdapter:isDestroyed())
 end)
 
-Harness.test("callback failure and numeric overflow fail once", function()
+Harness.test("callback failure and numeric precision handling are deterministic", function()
 	local callbackClock = FakeClock.new()
 	local callbackPlayback = createPlayback(callbackClock, {
 		duration = 1,
@@ -1362,14 +1702,16 @@ Harness.test("callback failure and numeric overflow fail once", function()
 
 	local driftClock = FakeClock.new()
 	local driftRuns = 0
+	local driftPosition: PlaybackPosition? = nil
 	local drift = createPlayback(driftClock, {
 		duration = 1,
 		loop = true,
 		events = {
 			{
 				time = 0.01,
-				run = function()
+				run = function(context)
 					driftRuns += 1
+					driftPosition = context:getPosition()
 				end,
 			},
 		},
@@ -1377,10 +1719,11 @@ Harness.test("callback failure and numeric overflow fail once", function()
 		position = { timePosition = 0.5, loopIndex = 1_000_000_000_000 },
 	})
 	drift:play()
-	Harness.assertEqual(driftRuns, 0)
-	Harness.assertEqual(drift:getCompletion().status, "failed")
-	Harness.assertEqual(drift:getCompletion().reason, "numericOverflow")
-	Harness.assertEqual(driftClock:getTaskCount(), 0)
+	Harness.assertEqual(driftRuns, 1)
+	Harness.assertEqual((driftPosition :: PlaybackPosition).timePosition, 0.01)
+	Harness.assertEqual((driftPosition :: PlaybackPosition).loopIndex, 1_000_000_000_000)
+	Harness.assertTrue(drift:isAlive())
+	Harness.assertEqual(driftClock:getTaskCount(), 1)
 
 	local identityClock = FakeClock.new()
 	local identity = createPlayback(identityClock, {
