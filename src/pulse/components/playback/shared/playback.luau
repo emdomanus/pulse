@@ -6,7 +6,7 @@ local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
 local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.types.components.playback)
 local SequenceTypes = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
 local TemporalAdapterTypes = require(script.Parent.Parent.Parent.Parent.types.managers.temporalAdapter)
-local Sequence = require(script.Parent.Parent.Parent.sequence.shared.sequence)
+local SequenceRuntime = require(script.Parent.Parent.Parent.sequence.shared.sequence.runtime)
 local TemporalAdapter = require(script.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 
 type AddressPolicy = DefTypes.AddressPolicy
@@ -214,7 +214,7 @@ local function emitLoop(self: PlaybackImpl, change: LoopChange): boolean
 		requestTerminal(self, "failed", "catchUpLimitExceeded")
 		return false
 	end
-	local authored = Sequence._getOnLoop(self._sequence)
+	local authored = SequenceRuntime.getOnLoop(self._sequence)
 	if authored ~= nil and not pcall(authored, asAttachment(self), immutableChange) then
 		requestTerminal(self, "failed", "callbackFailed")
 		return false
@@ -236,17 +236,17 @@ local function emitLoop(self: PlaybackImpl, change: LoopChange): boolean
 end
 
 local function runEventsAt(self: PlaybackImpl, timePosition: number, forward: boolean): boolean
-	local first, last = Sequence._eventRangeAt(self._sequence, timePosition)
+	local first, last = SequenceRuntime.eventRangeAt(self._sequence, timePosition)
 	if forward then
 		for index = first, last do
-			local event = Sequence._getEvent(self._sequence, index)
+			local event = SequenceRuntime.getEvent(self._sequence, index)
 			if not invokeEvent(self, event.run) then
 				return false
 			end
 		end
 	else
 		for index = last, first, -1 do
-			local reverse = Sequence._getEvent(self._sequence, index).reverse
+			local reverse = SequenceRuntime.getEvent(self._sequence, index).reverse
 			if reverse ~= nil and not invokeEvent(self, reverse) then
 				return false
 			end
@@ -282,7 +282,7 @@ local function processBoundary(
 			loopIndex = boundary.loopIndex + 1,
 			unwrappedTimePosition = boundary.unwrappedTimePosition,
 		}
-		local nextBoundary = Sequence._boundaryAt(self._sequence, nextPosition)
+		local nextBoundary = SequenceRuntime.boundaryAt(self._sequence, nextPosition)
 		if nextBoundary == nil then
 			requestTerminal(self, "failed", "numericOverflow")
 			return false
@@ -308,7 +308,7 @@ local function processBoundary(
 			loopIndex = boundary.loopIndex - 1,
 			unwrappedTimePosition = boundary.unwrappedTimePosition,
 		}
-		local previousBoundary = Sequence._boundaryAt(self._sequence, previousPosition)
+		local previousBoundary = SequenceRuntime.boundaryAt(self._sequence, previousPosition)
 		if previousBoundary == nil then
 			requestTerminal(self, "failed", "numericOverflow")
 			return false
@@ -343,7 +343,7 @@ local function prepareDirection(self: PlaybackImpl, direction: TraversalDirectio
 end
 
 local function selectNextBoundary(self: PlaybackImpl, direction: TraversalDirection): SequenceBoundary?
-	local ok, boundary = pcall(Sequence._nextBoundary, self._sequence, self._position, direction)
+	local ok, boundary = pcall(SequenceRuntime.nextBoundary, self._sequence, self._position, direction)
 	if not ok then
 		requestTerminal(self, "failed", "numericOverflow")
 		return nil
@@ -429,7 +429,7 @@ local function reanchor(self: PlaybackImpl, sample: ClockSample)
 end
 
 local function positionAt(self: PlaybackImpl, unwrappedTimePosition: number): PlaybackPosition?
-	local ok, position = pcall(Sequence._positionAt, self._sequence, unwrappedTimePosition)
+	local ok, position = pcall(SequenceRuntime.positionAt, self._sequence, unwrappedTimePosition)
 	if not ok then
 		requestTerminal(self, "failed", "numericOverflow")
 		return nil
@@ -458,7 +458,7 @@ end
 
 local function hasActiveUpdate(self: PlaybackImpl, direction: TraversalDirection): boolean
 	local localPosition = updateLocalPosition(self, direction)
-	for _, update in Sequence._getUpdates(self._sequence) do
+	for _, update in SequenceRuntime.getUpdates(self._sequence) do
 		if direction == "forward" then
 			if localPosition >= update.startTime and localPosition < update.endTime then
 				return true
@@ -698,15 +698,15 @@ local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, dispo
 		return false
 	end
 	self._position = target
-	local onPlay = Sequence._getOnPlay(self._sequence)
+	local onPlay = SequenceRuntime.getOnPlay(self._sequence)
 	if onPlay ~= nil and not invokeEvent(self, onPlay) then
 		return false
 	end
-	local base = Sequence._validateAddress(self._sequence, {
+	local base = SequenceRuntime.validateAddress(self._sequence, {
 		timePosition = 0,
 		loopIndex = target.loopIndex,
 	})
-	local baseBoundary = Sequence._boundaryAt(self._sequence, base)
+	local baseBoundary = SequenceRuntime.boundaryAt(self._sequence, base)
 	if baseBoundary == nil then
 		requestTerminal(self, "failed", "numericOverflow")
 		return false
@@ -737,7 +737,7 @@ local function applyAddressTarget(
 		return reconstructTo(self, target, true)
 	end
 
-	local boundary = Sequence._boundaryAt(self._sequence, target)
+	local boundary = SequenceRuntime.boundaryAt(self._sequence, target)
 	self._position = boundary or target
 	local direction = desiredDirection(self)
 	if boundary ~= nil and direction ~= nil then
@@ -849,7 +849,7 @@ runPhaseUpdates = function(self: PlaybackImpl, fromPosition: number, toPosition:
 	local finalLoop = if direction == "forward" then lastLoop else firstLoop
 	while true do
 		local base = loopIndex * duration
-		for _, update in Sequence._getUpdates(self._sequence) do
+		for _, update in SequenceRuntime.getUpdates(self._sequence) do
 			local overlap = updateOverlap(fromPosition, toPosition, base + update.startTime, base + update.endTime)
 			local localNow = updateLocalPosition(self, direction)
 			local activeNow = if direction == "forward"
@@ -946,7 +946,7 @@ local function applySeek(self: PlaybackImpl, address: SequenceAddress, sample: C
 	if self._status == "idle" or self._completion ~= nil then
 		return
 	end
-	local validated = Sequence._validateAddress(self._sequence, address)
+	local validated = SequenceRuntime.validateAddress(self._sequence, address)
 	if self._status == "playing" then
 		reconcileSample(self, sample, true, false)
 		if self._terminalRequest ~= nil then
@@ -1071,7 +1071,7 @@ local function ConstructPlayback(
 	local config: PlaybackOptions = options or {}
 	local speed = config.playbackSpeed or 1
 	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
-	local initial = Sequence._validateAddress(sequence, config.position or { timePosition = 0 })
+	local initial = SequenceRuntime.validateAddress(sequence, config.position or { timePosition = 0 })
 	local self: PlaybackImpl
 	local function reachedCallback(_now: number, _direction: unknown)
 		local sample, clockSerial = snapshotClock(self)
@@ -1210,7 +1210,7 @@ function Playback.getPlaybackSpeed(self: PlaybackImpl): number
 end
 
 function Playback.seek(self: PlaybackImpl, address: SequenceAddress): boolean
-	local validated = Sequence._validateAddress(self._sequence, address)
+	local validated = SequenceRuntime.validateAddress(self._sequence, address)
 	if self._status == "idle" or self._completion ~= nil or self._finishing or self._terminalRequest ~= nil then
 		return false
 	end
@@ -1243,7 +1243,7 @@ function Playback.getPosition(self: PlaybackImpl): PlaybackPosition
 				if target == self._position.unwrappedTimePosition then
 					return publicPosition(self._position)
 				end
-				local ok, position = pcall(Sequence._positionAt, self._sequence, target)
+				local ok, position = pcall(SequenceRuntime.positionAt, self._sequence, target)
 				if ok then
 					return position
 				end

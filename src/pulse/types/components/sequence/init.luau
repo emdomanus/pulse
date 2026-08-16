@@ -62,7 +62,7 @@ export type Sequence = {
 
 export type SequenceConstructor = (definition: SequenceDefinition) -> Sequence
 
-export type SequenceImpl = Sequence & {
+export type SequenceState = {
 	_duration: number,
 	_loop: boolean,
 	_addressPolicy: AddressPolicy,
@@ -72,6 +72,8 @@ export type SequenceImpl = Sequence & {
 	_onPlay: EventCallback?,
 	_onLoop: ((playback: PlaybackContext, change: LoopChange) -> ())?,
 }
+
+export type SequenceImpl = Sequence & SequenceState
 
 export type Builder = {
 	duration: (self: Builder, seconds: number) -> Builder,
