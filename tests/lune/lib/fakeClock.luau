@@ -85,6 +85,8 @@ export type FakeClock<PhaseT> = {
 	getTaskCount: (self: FakeClock<PhaseT>) -> number,
 	getChangedBindingCount: (self: FakeClock<PhaseT>) -> number,
 	getPhaseBindingCount: (self: FakeClock<PhaseT>) -> number,
+	getChangedReleaseCount: (self: FakeClock<PhaseT>) -> number,
+	getPhaseReleaseCount: (self: FakeClock<PhaseT>) -> number,
 	getScheduleCount: (self: FakeClock<PhaseT>) -> number,
 	getRescheduleCount: (self: FakeClock<PhaseT>) -> number,
 	getCancelCount: (self: FakeClock<PhaseT>) -> number,
@@ -99,6 +101,8 @@ export type FakeClock<PhaseT> = {
 	_tasks: { [number]: ReachedRecord<PhaseT> },
 	_changedBindings: { ChangedBinding },
 	_phaseBindings: { PhaseBinding<PhaseT> },
+	_changedReleaseCount: number,
+	_phaseReleaseCount: number,
 	_phaseStates: { PhaseState<PhaseT> },
 	_scheduleCount: number,
 	_rescheduleCount: number,
@@ -166,6 +170,8 @@ function FakeClock.new<PhaseT>(options: FakeClockOptions?): FakeClock<PhaseT>
 			_tasks = {},
 			_changedBindings = {},
 			_phaseBindings = {},
+			_changedReleaseCount = 0,
+			_phaseReleaseCount = 0,
 			_phaseStates = {},
 			_scheduleCount = 0,
 			_rescheduleCount = 0,
@@ -202,6 +208,7 @@ function FakeClock.bindToChanged<PhaseT>(self: FakeClock<PhaseT>, callback: RawC
 		})
 	end
 	return function()
+		self._changedReleaseCount += 1
 		binding.active = false
 	end
 end
@@ -276,6 +283,7 @@ function FakeClock.bindPhase<PhaseT>(self: FakeClock<PhaseT>, phase: PhaseT, cal
 	}
 	table.insert(self._phaseBindings, binding)
 	return function()
+		self._phaseReleaseCount += 1
 		binding.active = false
 	end
 end
@@ -460,6 +468,14 @@ function FakeClock.getPhaseBindingCount<PhaseT>(self: FakeClock<PhaseT>): number
 		end
 	end
 	return count
+end
+
+function FakeClock.getChangedReleaseCount<PhaseT>(self: FakeClock<PhaseT>): number
+	return self._changedReleaseCount
+end
+
+function FakeClock.getPhaseReleaseCount<PhaseT>(self: FakeClock<PhaseT>): number
+	return self._phaseReleaseCount
 end
 
 function FakeClock.getScheduleCount<PhaseT>(self: FakeClock<PhaseT>): number

@@ -38,6 +38,8 @@ type FakeClock = {
 	getTaskCount: (self: FakeClock) -> number,
 	getChangedBindingCount: (self: FakeClock) -> number,
 	getPhaseBindingCount: (self: FakeClock) -> number,
+	getChangedReleaseCount: (self: FakeClock) -> number,
+	getPhaseReleaseCount: (self: FakeClock) -> number,
 	getScheduleCount: (self: FakeClock) -> number,
 	getRescheduleCount: (self: FakeClock) -> number,
 	getCancelCount: (self: FakeClock) -> number,
@@ -143,6 +145,12 @@ type TemporalAdapter = {
 	isDestroyed: (self: TemporalAdapter) -> boolean,
 }
 
+type TemporalAdapterInternal = {
+	_attach: (adapter: TemporalAdapter, playback: Playback) -> boolean,
+	_detach: (adapter: TemporalAdapter, playback: Playback) -> (),
+	_setUpdating: (adapter: TemporalAdapter, playback: Playback, updating: boolean) -> boolean,
+}
+
 type PulseApi = {
 	sequence: (definition: Definition) -> Sequence,
 	builder: () -> Builder,
@@ -176,6 +184,9 @@ local transformed = Transform.write({
 	tempDir = ".lune-pulse-tests",
 })
 local Pulse = (transformed.requireModule("init.luau") :: unknown) :: PulseApi
+local TemporalAdapterRuntime = (
+	transformed.requireModule("pulse/managers/temporalAdapter/shared/temporalAdapter.luau") :: unknown
+) :: TemporalAdapterInternal
 transformed.cleanup()
 
 local PHASE = "simulation"
@@ -829,6 +840,149 @@ Harness.test("two updating playbacks share exactly one adapter phase binding", f
 	second:cancel()
 	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
 	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+end)
+
+Harness.test("clock fanout skips a sibling removed before its turn", function()
+	local clock = FakeClock.new()
+	local adapter = adapterFor(clock)
+	local second: Playback
+	local secondHits = 0
+	local first = Pulse.playback(
+		Pulse.sequence({
+			duration = 2,
+			events = {
+				{
+					time = 0.25,
+					run = function()
+						second:cancel("removedDuringFanout")
+					end,
+				},
+			},
+		}),
+		adapter,
+		nil
+	)
+	second = Pulse.playback(
+		Pulse.sequence({
+			duration = 2,
+			events = {
+				{
+					time = 0.25,
+					run = function()
+						secondHits += 1
+					end,
+				},
+			},
+		}),
+		adapter,
+		nil
+	)
+	first:play()
+	second:play()
+	clock:advanceRootTo(0.5)
+	clock:setRate(2)
+	Harness.assertEqual(secondHits, 0)
+	Harness.assertEqual(second:getCompletion().reason, "removedDuringFanout")
+	Harness.assertEqual(clock:getChangedBindingCount(), 1)
+	first:cancel()
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	Harness.assertEqual(clock:getChangedReleaseCount(), 1)
+end)
+
+Harness.test("phase fanout defers a playback added during dispatch", function()
+	local clock = FakeClock.new()
+	local adapter = adapterFor(clock)
+	local newcomer: Playback? = nil
+	local newcomerUpdates = 0
+	local introduced = false
+	local first = Pulse.playback(
+		Pulse.sequence({
+			duration = 2,
+			updates = {
+				{
+					startTime = 0,
+					endTime = 2,
+					run = function(_playback, dt)
+						if dt > 0 and not introduced then
+							introduced = true
+							local created = Pulse.playback(
+								Pulse.sequence({
+									duration = 2,
+									updates = {
+										{
+											startTime = 0,
+											endTime = 2,
+											run = function()
+												newcomerUpdates += 1
+											end,
+										},
+									},
+								}),
+								adapter,
+								nil
+							)
+							newcomer = created
+							created:play()
+						end
+					end,
+				},
+			},
+		}),
+		adapter,
+		nil
+	)
+	first:play()
+	clock:stepRootTo(0.25, PHASE)
+	Harness.assertTrue(newcomer ~= nil)
+	Harness.assertEqual(newcomerUpdates, 0)
+	clock:stepRootTo(0.5, PHASE)
+	Harness.assertEqual(newcomerUpdates, 1)
+	first:cancel()
+	local added = assert(newcomer, "phase fanout should create the newcomer")
+	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	added:cancel()
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+	Harness.assertEqual(clock:getPhaseReleaseCount(), 1)
+end)
+
+Harness.test("adapter membership requests are idempotent and final removal releases once", function()
+	local clock = FakeClock.new()
+	local adapter = adapterFor(clock)
+	local updates = 0
+	local playback = Pulse.playback(
+		Pulse.sequence({
+			duration = 2,
+			updates = {
+				{
+					startTime = 0,
+					endTime = 2,
+					run = function()
+						updates += 1
+					end,
+				},
+			},
+		}),
+		adapter,
+		nil
+	)
+	playback:play()
+	Harness.assertTrue(TemporalAdapterRuntime._attach(adapter, playback))
+	Harness.assertTrue(TemporalAdapterRuntime._attach(adapter, playback))
+	Harness.assertTrue(TemporalAdapterRuntime._setUpdating(adapter, playback, true))
+	Harness.assertTrue(TemporalAdapterRuntime._setUpdating(adapter, playback, true))
+	Harness.assertEqual(clock:getChangedBindingCount(), 1)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	clock:stepRootTo(0.25, PHASE)
+	Harness.assertEqual(updates, 1)
+
+	Harness.assertTrue(TemporalAdapterRuntime._setUpdating(adapter, playback, false))
+	Harness.assertTrue(TemporalAdapterRuntime._setUpdating(adapter, playback, false))
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
+	Harness.assertEqual(clock:getPhaseReleaseCount(), 1)
+	playback:cancel()
+	TemporalAdapterRuntime._detach(adapter, playback)
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	Harness.assertEqual(clock:getChangedReleaseCount(), 1)
 end)
 
 Harness.test("shared fanout keeps not-yet-notified playback inspection serialized", function()

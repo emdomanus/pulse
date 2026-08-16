@@ -111,13 +111,18 @@ local function findAttachment(values: { PlaybackSink }, candidate: PlaybackSink)
 	end
 	return nil
 end
-
-local function removeAttachment(values: { PlaybackSink }, candidate: PlaybackSink): boolean
-	local index = findAttachment(values, candidate)
-	if index == nil then
+local function removeMembership(
+	values: { PlaybackSink },
+	membership: { [PlaybackSink]: true },
+	candidate: PlaybackSink
+): boolean
+	if membership[candidate] == nil then
 		return false
 	end
+	local index = findAttachment(values, candidate)
+	assert(index ~= nil, "Pulse adapter membership invariant failed")
 	table.remove(values, index)
+	membership[candidate] = nil
 	return true
 end
 
@@ -153,16 +158,18 @@ local function notifyAdapterDestroyed(self: TemporalAdapterImpl, reason: string)
 	end
 	self._destroyed = true
 	local attachments = table.clone(self._attachments)
-	for _, playback in attachments do
-		pcall(playback._onAdapterDestroyed, playback, reason)
-	end
-	self._attachments = {}
-	self._updating = {}
+	table.clear(self._attachments)
+	table.clear(self._attachmentMembership)
+	table.clear(self._updating)
+	table.clear(self._updatingMembership)
 	self._notifications = {}
 	local changedRelease = self._changedRelease
 	local phaseRelease = self._phaseRelease
 	self._changedRelease = nil
 	self._phaseRelease = nil
+	for _, playback in attachments do
+		pcall(playback._onAdapterDestroyed, playback, reason)
+	end
 	releaseSafely(phaseRelease)
 	releaseSafely(changedRelease)
 end
@@ -181,13 +188,17 @@ local function dispatchNotifications(self: TemporalAdapterImpl)
 		end
 		local notification = table.remove(self._notifications, 1)
 		assert(notification ~= nil, "Pulse adapter notification queue invariant failed")
-		local snapshot: { PlaybackSink } =
-			table.clone(if notification.kind == "clock" then self._attachments else self._updating)
+		local snapshot: { PlaybackSink }
+		local membership: { [PlaybackSink]: true }
+		if notification.kind == "clock" then
+			snapshot = table.clone(self._attachments)
+			membership = self._attachmentMembership
+		else
+			snapshot = table.clone(self._updating)
+			membership = self._updatingMembership
+		end
 		for _, playback in snapshot do
-			local isAttached = if notification.kind == "clock"
-				then findAttachment(self._attachments, playback) ~= nil
-				else findAttachment(self._updating, playback) ~= nil
-			if isAttached then
+			if membership[playback] ~= nil then
 				local ok = if notification.kind == "clock"
 					then pcall(
 						playback._onAdapterClockChanged,
@@ -290,7 +301,9 @@ function TemporalAdapter.new<PhaseInputT, DirectionTokenT>(
 			_directions = storedDirections,
 			_destroyed = false,
 			_attachments = {},
+			_attachmentMembership = {},
 			_updating = {},
+			_updatingMembership = {},
 			_changedRelease = nil,
 			_phaseRelease = nil,
 			_changedCallback = changedCallback,
@@ -328,7 +341,7 @@ function TemporalAdapter._attach(adapter: TemporalAdapter, playback: PlaybackSin
 	if self._destroyed or clockIsDestroyed(self) then
 		return false
 	end
-	if findAttachment(self._attachments, playback) ~= nil then
+	if self._attachmentMembership[playback] ~= nil then
 		return true
 	end
 	if #self._attachments == 0 then
@@ -339,17 +352,18 @@ function TemporalAdapter._attach(adapter: TemporalAdapter, playback: PlaybackSin
 		self._changedRelease = release
 	end
 	table.insert(self._attachments, playback)
+	self._attachmentMembership[playback] = true
 	return true
 end
 
 function TemporalAdapter._detach(adapter: TemporalAdapter, playback: PlaybackSink)
 	local self = asImpl(adapter)
-	if removeAttachment(self._updating, playback) and #self._updating == 0 then
+	if removeMembership(self._updating, self._updatingMembership, playback) and #self._updating == 0 then
 		local release = self._phaseRelease
 		self._phaseRelease = nil
 		releaseSafely(release)
 	end
-	if removeAttachment(self._attachments, playback) and #self._attachments == 0 then
+	if removeMembership(self._attachments, self._attachmentMembership, playback) and #self._attachments == 0 then
 		local release = self._changedRelease
 		self._changedRelease = nil
 		releaseSafely(release)
@@ -359,10 +373,10 @@ end
 function TemporalAdapter._setUpdating(adapter: TemporalAdapter, playback: PlaybackSink, updating: boolean): boolean
 	local self = asImpl(adapter)
 	if updating then
-		if self._destroyed or findAttachment(self._attachments, playback) == nil then
+		if self._destroyed or self._attachmentMembership[playback] == nil then
 			return false
 		end
-		if findAttachment(self._updating, playback) ~= nil then
+		if self._updatingMembership[playback] ~= nil then
 			return true
 		end
 		if #self._updating == 0 then
@@ -373,10 +387,11 @@ function TemporalAdapter._setUpdating(adapter: TemporalAdapter, playback: Playba
 			self._phaseRelease = release
 		end
 		table.insert(self._updating, playback)
+		self._updatingMembership[playback] = true
 		return true
 	end
 
-	if removeAttachment(self._updating, playback) and #self._updating == 0 then
+	if removeMembership(self._updating, self._updatingMembership, playback) and #self._updating == 0 then
 		local release = self._phaseRelease
 		self._phaseRelease = nil
 		releaseSafely(release)
