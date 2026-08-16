@@ -20,6 +20,18 @@ ProviderClock -> TemporalAdapter ----------> Playback -> authored callbacks
 Destroying an adapter detaches and fails its active playbacks; it never destroys the borrowed clock.
 Destroying a playback releases only that playback's task, adapter membership, observers, and cleanup.
 
+### Playback implementation boundaries
+
+Playback remains one stateful object. Its implementation is separated into stateless modules that
+operate directly on that object; none creates a secondary view, port, or ownership record.
+
+| Module | Responsibility |
+| --- | --- |
+| `playback/init.luau` | Metatable, construction, and public method bindings |
+| `playback/runtime.luau` | Clock anchoring, scheduling, update sampling, and serialized operations |
+| `playback/traversal.luau` | Authored boundary execution, loop traversal, reconstruction, and skip placement |
+| `playback/lifecycle.luau` | Task and adapter release, cleanup generations, completion, and observers |
+
 ## Scheduling model
 
 An event-only playback asks the provider clock for its next reached boundary. After a boundary runs,

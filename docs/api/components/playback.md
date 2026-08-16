@@ -1,6 +1,6 @@
 # Components / Playback
 
-<div class="api-path">src/pulse/components/playback/shared/playback.luau</div>
+<div class="api-path">src/pulse/components/playback/shared/playback/init.luau</div>
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public live object</span>
