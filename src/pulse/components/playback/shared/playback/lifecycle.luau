@@ -9,11 +9,6 @@ local TemporalAdapter =
 	require(script.Parent.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 
 type Completion = DefTypes.Completion
-type EndedBinding = PlaybackTypes.EndedBinding
-type EndedCallback = PlaybackTypes.EndedCallback
-type LoopedBinding = PlaybackTypes.LoopedBinding
-type LoopedCallback = PlaybackTypes.LoopedCallback
-type Playback = PlaybackTypes.Playback
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
 type PlaybackSink = TemporalAdapterTypes.PlaybackSink
 type TerminalStatus = DefTypes.TerminalStatus
@@ -25,18 +20,9 @@ type LifecycleModule = {
 	disposeGeneration: (self: PlaybackImpl) -> boolean,
 	finish: (self: PlaybackImpl, status: TerminalStatus, reason: string?) -> (),
 	requestTerminal: (self: PlaybackImpl, status: TerminalStatus, reason: string?) -> (),
-	addCleanup: (self: PlaybackImpl, cleanup: () -> ()) -> (),
-	cancel: (self: PlaybackImpl, reason: string?) -> (),
-	destroy: (self: PlaybackImpl) -> (),
-	onEnded: (self: PlaybackImpl, callback: EndedCallback) -> () -> (),
-	onLooped: (self: PlaybackImpl, callback: LoopedCallback) -> () -> (),
-	isAlive: (self: PlaybackImpl) -> boolean,
-	getCompletion: (self: PlaybackImpl) -> Completion?,
 }
 
 local MAX_RECONCILIATION_WORK = 4_096
-
-local function noopRelease() end
 
 local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
 	return self
@@ -143,96 +129,6 @@ local function requestTerminal(self: PlaybackImpl, status: TerminalStatus, reaso
 	finish(self, status, reason)
 end
 
-local function addCleanup(self: PlaybackImpl, cleanup: () -> ())
-	assert(type(cleanup) == "function", "Pulse cleanup must be a callback")
-	if self._completion ~= nil then
-		if self._finishing then
-			return
-		end
-		self._finishing = true
-		pcall(cleanup)
-		self._finishing = false
-		return
-	end
-	table.insert(self._cleanup, cleanup)
-end
-
-local function cancel(self: PlaybackImpl, reason: string?)
-	requestTerminal(self, "cancelled", reason)
-end
-
-local function destroy(self: PlaybackImpl)
-	if self._completion ~= nil then
-		self._endedBindings = {}
-		self._loopedBindings = {}
-		return
-	end
-	requestTerminal(self, "destroyed", nil)
-end
-
-local function onEnded(self: PlaybackImpl, callback: EndedCallback): () -> ()
-	local completion = self._completion
-	if completion ~= nil then
-		if self._deliveringEnded then
-			return noopRelease
-		end
-		self._deliveringEnded = true
-		pcall(callback, completion)
-		self._deliveringEnded = false
-		return noopRelease
-	end
-	local binding: EndedBinding = {
-		callback = callback,
-		active = true,
-	}
-	table.insert(self._endedBindings, binding)
-	return function()
-		if not binding.active then
-			return
-		end
-		binding.active = false
-		binding.callback = nil
-		for index, candidate in self._endedBindings do
-			if candidate == binding then
-				table.remove(self._endedBindings, index)
-				break
-			end
-		end
-	end
-end
-
-local function onLooped(self: PlaybackImpl, callback: LoopedCallback): () -> ()
-	if self._completion ~= nil or self._finishing then
-		return noopRelease
-	end
-	local binding: LoopedBinding = {
-		callback = callback,
-		active = true,
-	}
-	table.insert(self._loopedBindings, binding)
-	return function()
-		if not binding.active then
-			return
-		end
-		binding.active = false
-		binding.callback = nil
-		for index, candidate in self._loopedBindings do
-			if candidate == binding then
-				table.remove(self._loopedBindings, index)
-				break
-			end
-		end
-	end
-end
-
-local function isAlive(self: PlaybackImpl): boolean
-	return self._completion == nil
-end
-
-local function getCompletion(self: PlaybackImpl): Completion?
-	return self._completion
-end
-
 local module: LifecycleModule = {
 	cancelScheduled = cancelScheduled,
 	stopUpdating = stopUpdating,
@@ -240,13 +136,6 @@ local module: LifecycleModule = {
 	disposeGeneration = disposeGeneration,
 	finish = finish,
 	requestTerminal = requestTerminal,
-	addCleanup = addCleanup,
-	cancel = cancel,
-	destroy = destroy,
-	onEnded = onEnded,
-	onLooped = onLooped,
-	isAlive = isAlive,
-	getCompletion = getCompletion,
 }
 
 return module

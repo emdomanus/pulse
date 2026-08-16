@@ -15,29 +15,23 @@ type AddressCause = DefTypes.AddressCause
 type ClockChange = TemporalAdapterTypes.ClockChange
 type ClockSample = TemporalAdapterTypes.ClockSample
 type Operation = PlaybackTypes.Operation
-type Playback = PlaybackTypes.Playback
 type PlaybackControl = DefTypes.PlaybackControl
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
 type PlaybackPosition = DefTypes.PlaybackPosition
 type PlaybackSink = TemporalAdapterTypes.PlaybackSink
 type SequenceAddress = DefTypes.SequenceAddress
-type Status = DefTypes.Status
 type TerminalRequest = PlaybackTypes.TerminalRequest
 type TraversalDirection = DefTypes.TraversalDirection
 
 type RuntimeModule = {
-	play: (self: PlaybackImpl) -> Playback,
-	pause: (self: PlaybackImpl) -> (),
-	resume: (self: PlaybackImpl) -> (),
-	setPlaybackSpeed: (self: PlaybackImpl, speed: number) -> (),
-	getPlaybackSpeed: (self: PlaybackImpl) -> number,
-	seek: (self: PlaybackImpl, address: SequenceAddress) -> boolean,
-	getPosition: (self: PlaybackImpl) -> PlaybackPosition,
-	getStatus: (self: PlaybackImpl) -> Status,
+	derivePosition: (self: PlaybackImpl, clockPosition: number) -> number?,
+	reanchor: (self: PlaybackImpl, sample: ClockSample) -> (),
+	desiredDirection: (self: PlaybackImpl) -> TraversalDirection?,
+	snapshotClock: (self: PlaybackImpl) -> (ClockSample?, number),
+	refreshOwnership: (self: PlaybackImpl, preserveTask: boolean) -> (),
+	drainOperations: (self: PlaybackImpl) -> (),
+	enqueue: (self: PlaybackImpl, operation: Operation) -> (),
 	onReached: (self: PlaybackImpl) -> (),
-	onAdapterClockChanged: (self: PlaybackImpl, change: ClockChange, sample: ClockSample, clockSerial: number) -> (),
-	onAdapterPhase: (self: PlaybackImpl, sample: ClockSample, clockSerial: number) -> (),
-	onAdapterDestroyed: (self: PlaybackImpl, reason: string) -> (),
 }
 
 local MAX_RECONCILIATION_WORK = 4_096
@@ -51,13 +45,9 @@ local stopUpdating = Lifecycle.stopUpdating
 local detach = Lifecycle.detach
 local finish = Lifecycle.finish
 local requestTerminal = Lifecycle.requestTerminal
-local emitAddress = Traversal.emitAddress
 local reconcileTo = Traversal.reconcileTo
 local prepareDirection = Traversal.prepareDirection
 local selectNextBoundary = Traversal.selectNextBoundary
-local beginGeneration = Traversal.beginGeneration
-local reconstructTo = Traversal.reconstructTo
-local placeWithoutTraversal = Traversal.placeWithoutTraversal
 local applyAddressTarget = Traversal.applyAddressTarget
 
 local refreshOwnership: (self: PlaybackImpl, preserveTask: boolean) -> ()
@@ -90,14 +80,6 @@ end
 
 local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
 	return self
-end
-
-local function publicPosition(position: PlaybackPosition): PlaybackPosition
-	return {
-		timePosition = position.timePosition,
-		loopIndex = position.loopIndex,
-		unwrappedTimePosition = position.unwrappedTimePosition,
-	}
 end
 
 local function advanceTo(self: PlaybackImpl, target: PlaybackPosition, direction: TraversalDirection): boolean
@@ -728,180 +710,6 @@ local function enqueue(self: PlaybackImpl, operation: Operation)
 	drainOperations(self)
 end
 
-local function play(self: PlaybackImpl): Playback
-	if self._status ~= "idle" or self._finishing then
-		return self
-	end
-	local sample, clockSerial = TemporalAdapter._snapshot(self._adapter)
-	if sample == nil then
-		finish(self, "failed", "clockReadFailed")
-		return self
-	end
-	self._status = "playing"
-	self._anchorClock = sample.timePosition
-	self._anchorSequence = self._initialPosition.unwrappedTimePosition
-	self._clockRate = sample.rate
-	self._appliedClockSerial = clockSerial
-	self._position = self._initialPosition
-	if not TemporalAdapter._attach(self._adapter, asPlaybackSink(self)) then
-		finish(self, "failed", "adapterAttachFailed")
-		return self
-	end
-	self._attached = true
-
-	self._busy = true
-	self._workCount = 0
-	local initialized: boolean
-	if self._initialMode == "reconstruct" then
-		initialized = reconstructTo(self, self._initialPosition, false)
-	else
-		initialized = beginGeneration(self, self._initialPosition, false)
-		if initialized then
-			placeWithoutTraversal(self, self._initialPosition, desiredDirection(self))
-		end
-	end
-	if initialized then
-		emitAddress(self, "initial" :: AddressCause, self._initialMode, nil)
-	end
-	if self._terminalRequest == nil and self._sequence:getDuration() == 0 then
-		requestTerminal(self, "completed", nil)
-	end
-	if self._terminalRequest == nil then
-		reanchor(self, sample)
-		refreshOwnership(self, false)
-	end
-	local terminal = self._terminalRequest
-	self._terminalRequest = nil
-	self._busy = false
-	if terminal ~= nil then
-		finish(self, terminal.status, terminal.reason)
-	else
-		drainOperations(self)
-	end
-	return self
-end
-
-local function pause(self: PlaybackImpl)
-	if self._status ~= "playing" or self._finishing or self._terminalRequest ~= nil then
-		return
-	end
-	local sample, clockSerial = snapshotClock(self)
-	if sample ~= nil then
-		enqueue(self, {
-			kind = "pause",
-			sample = sample,
-			clockSerial = clockSerial,
-		})
-	end
-end
-
-local function resume(self: PlaybackImpl)
-	if self._status ~= "paused" or self._finishing or self._terminalRequest ~= nil then
-		return
-	end
-	local sample, clockSerial = snapshotClock(self)
-	if sample ~= nil then
-		enqueue(self, {
-			kind = "resume",
-			sample = sample,
-			clockSerial = clockSerial,
-		})
-	end
-end
-
-local function setPlaybackSpeed(self: PlaybackImpl, speed: number)
-	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
-	if
-		(self._status == "playing" or self._status == "paused")
-		and not self._finishing
-		and self._terminalRequest == nil
-	then
-		local sample, clockSerial = snapshotClock(self)
-		if sample ~= nil then
-			enqueue(self, {
-				kind = "speed",
-				speed = speed,
-				sample = sample,
-				clockSerial = clockSerial,
-			})
-		end
-	end
-end
-
-local function getPlaybackSpeed(self: PlaybackImpl): number
-	return self._playbackSpeed
-end
-
-local function seek(self: PlaybackImpl, address: SequenceAddress): boolean
-	local validated = SequenceRuntime.validateAddress(self._sequence, address)
-	if self._status == "idle" or self._completion ~= nil or self._finishing or self._terminalRequest ~= nil then
-		return false
-	end
-	local sample, clockSerial = snapshotClock(self)
-	if sample == nil then
-		return false
-	end
-	enqueue(self, {
-		kind = "seek",
-		address = {
-			timePosition = validated.timePosition,
-			loopIndex = validated.loopIndex,
-		},
-		sample = sample,
-		clockSerial = clockSerial,
-	})
-	return true
-end
-
-local function getPosition(self: PlaybackImpl): PlaybackPosition
-	if self._status == "playing" and not self._busy and not self._finishing then
-		local sample, clockSerial = TemporalAdapter._snapshot(self._adapter)
-		if sample == nil then
-			requestTerminal(self, "failed", "clockReadFailed")
-		elseif clockSerial > self._appliedClockSerial then
-			return publicPosition(self._position)
-		else
-			local target = derivePosition(self, sample.timePosition)
-			if target ~= nil then
-				if target == self._position.unwrappedTimePosition then
-					return publicPosition(self._position)
-				end
-				local ok, position = pcall(SequenceRuntime.positionAt, self._sequence, target)
-				if ok then
-					return position
-				end
-			end
-			requestTerminal(self, "failed", "numericOverflow")
-		end
-	end
-	return publicPosition(self._position)
-end
-
-local function getStatus(self: PlaybackImpl): Status
-	return self._status
-end
-
-local function onAdapterClockChanged(self: PlaybackImpl, change: ClockChange, sample: ClockSample, clockSerial: number)
-	enqueue(self, {
-		kind = "clockChange",
-		change = change,
-		sample = sample,
-		clockSerial = clockSerial,
-	})
-end
-
-local function onAdapterPhase(self: PlaybackImpl, sample: ClockSample, clockSerial: number)
-	enqueue(self, {
-		kind = "phase",
-		sample = sample,
-		clockSerial = clockSerial,
-	})
-end
-
-local function onAdapterDestroyed(self: PlaybackImpl, reason: string)
-	requestTerminal(self, "failed", reason)
-end
-
 local function onReached(self: PlaybackImpl)
 	local sample, clockSerial = snapshotClock(self)
 	if sample ~= nil then
@@ -914,18 +722,14 @@ local function onReached(self: PlaybackImpl)
 end
 
 local module: RuntimeModule = {
-	play = play,
-	pause = pause,
-	resume = resume,
-	setPlaybackSpeed = setPlaybackSpeed,
-	getPlaybackSpeed = getPlaybackSpeed,
-	seek = seek,
-	getPosition = getPosition,
-	getStatus = getStatus,
+	derivePosition = derivePosition,
+	reanchor = reanchor,
+	desiredDirection = desiredDirection,
+	snapshotClock = snapshotClock,
+	refreshOwnership = refreshOwnership,
+	drainOperations = drainOperations,
+	enqueue = enqueue,
 	onReached = onReached,
-	onAdapterClockChanged = onAdapterClockChanged,
-	onAdapterPhase = onAdapterPhase,
-	onAdapterDestroyed = onAdapterDestroyed,
 }
 
 return module

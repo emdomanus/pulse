@@ -27,10 +27,10 @@ operate directly on that object; none creates a secondary view, port, or ownersh
 
 | Module | Responsibility |
 | --- | --- |
-| `playback/init.luau` | Metatable, construction, and public method bindings |
+| `playback/init.luau` | Metatable, construction, and Playback method implementations |
 | `playback/runtime.luau` | Clock anchoring, scheduling, update sampling, and serialized operations |
 | `playback/traversal.luau` | Authored boundary execution, loop traversal, reconstruction, and skip placement |
-| `playback/lifecycle.luau` | Task and adapter release, cleanup generations, completion, and observers |
+| `playback/lifecycle.luau` | Task and adapter release, cleanup generations, and terminal completion delivery |
 
 ## Scheduling model
 
