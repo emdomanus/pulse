@@ -94,6 +94,13 @@ local function provePublicContract(
 				end,
 			},
 		},
+		onAddress = function(playback, info, context)
+			local _cause: Pulse.AddressCause = info.cause
+			local _mode: Pulse.AddressMode = info.mode
+			local _target: Pulse.PlaybackPosition = info.target
+			local _actorId: number = context.actorId
+			local _status: Pulse.Status = playback:getStatus()
+		end,
 	}
 	local sequence = Pulse.sequence(definition)
 	local playback: Pulse.Playback = Pulse.playback(sequence, adapter, {
@@ -102,6 +109,7 @@ local function provePublicContract(
 	}, {
 		playbackSpeed = 1,
 		position = { timePosition = 0 },
+		initialMode = "reconstruct",
 	})
 	local releaseEnded: Pulse.Release = playback:onEnded(function(completion)
 		local _terminal: Pulse.TerminalStatus = completion.status
@@ -133,6 +141,7 @@ local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
 			run = function(_playback, _dt, _timePosition, _context) end,
 		})
 		:onPlay(function(_playback, _context) end)
+		:onAddress(function(_playback, _info, _context) end)
 		:onLoop(function(_playback, _change, _context) end)
 		:compile()
 end

@@ -18,6 +18,10 @@ type Builder<ContextT> = {
 	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
 	update: (self: Builder<ContextT>, update: Update<ContextT>) -> Builder<ContextT>,
 	onPlay: (self: Builder<ContextT>, callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>,
+	onAddress: (
+		self: Builder<ContextT>,
+		callback: (PlaybackControl, AddressInfo, ContextT) -> ()
+	) -> Builder<ContextT>,
 	onLoop: (
 		self: Builder<ContextT>,
 		callback: (PlaybackControl, LoopChange, ContextT) -> ()
@@ -36,6 +40,7 @@ type Builder<ContextT> = {
 | [`event`](#builder-event) | Appends one event |
 | [`update`](#builder-update) | Appends one continuous interval |
 | [`onPlay`](#builder-on-play) | Sets generation setup |
+| [`onAddress`](#builder-on-address) | Sets address materialization |
 | [`onLoop`](#builder-on-loop) | Sets the authored loop observer |
 | [`compile`](#builder-compile) | Validates and returns an immutable Sequence |
 
@@ -107,6 +112,18 @@ Builder<ContextT>:onPlay(callback: (PlaybackControl, ContextT) -> ()) -> Builder
 ```
 
 Sets the callback that opens each initial or rebuilt generation.
+
+<a id="builder-on-address"></a>
+### Builder:onAddress
+
+```luau
+Builder<ContextT>:onAddress(
+	callback: (PlaybackControl, AddressInfo, ContextT) -> ()
+) -> Builder<ContextT>
+```
+
+Sets the callback that materializes host-owned state after an initial placement, seek, or clock
+discontinuity is established.
 
 <a id="builder-on-loop"></a>
 ### Builder:onLoop

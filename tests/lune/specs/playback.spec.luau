@@ -63,6 +63,14 @@ type PlaybackPosition = {
 	unwrappedTimePosition: number,
 }
 
+type AddressMode = "reconstruct" | "skip"
+type AddressInfo = {
+	cause: "initial" | "seek" | "clockDiscontinuity",
+	mode: AddressMode,
+	from: PlaybackPosition?,
+	target: PlaybackPosition,
+}
+
 type Playback = {
 	play: (self: Playback) -> Playback,
 	pause: (self: Playback) -> (),
@@ -109,6 +117,7 @@ type Definition = {
 	events: { Event }?,
 	updates: { Update }?,
 	onPlay: ((playback: Playback, context: unknown) -> ())?,
+	onAddress: ((playback: Playback, info: AddressInfo, context: unknown) -> ())?,
 	onLoop: ((playback: Playback, change: unknown, context: unknown) -> ())?,
 }
 
@@ -125,6 +134,7 @@ type Builder = {
 	event: (self: Builder, event: Event) -> Builder,
 	update: (self: Builder, update: Update) -> Builder,
 	onPlay: (self: Builder, callback: (playback: Playback, context: unknown) -> ()) -> Builder,
+	onAddress: (self: Builder, callback: (playback: Playback, info: AddressInfo, context: unknown) -> ()) -> Builder,
 	compile: (self: Builder) -> Sequence,
 }
 
@@ -144,6 +154,7 @@ type PulseApi = {
 		options: {
 			playbackSpeed: number?,
 			position: { timePosition: number, loopIndex: number? }?,
+			initialMode: AddressMode?,
 		}?
 	) -> Playback,
 }
@@ -179,6 +190,7 @@ local function createPlayback(
 	options: {
 		playbackSpeed: number?,
 		position: { timePosition: number, loopIndex: number? }?,
+		initialMode: AddressMode?,
 	}?
 ): (Playback, TemporalAdapter)
 	local adapter = adapterFor(clock)
@@ -203,7 +215,12 @@ Harness.test("compiler validates, freezes, and builder keeps fluent temporal nam
 		time = 0.5,
 		run = function() end,
 	}
-	local sequence = Pulse.builder():duration(1):addressPolicy("rebuild"):event(event):compile()
+	local sequence = Pulse.builder()
+		:duration(1)
+		:addressPolicy("rebuild")
+		:event(event)
+		:onAddress(function() end)
+		:compile()
 	event.time = 0.75
 	Harness.assertEqual(sequence:getDuration(), 1)
 	Harness.assertEqual(sequence:getAddressPolicy(), "rebuild")
@@ -229,6 +246,7 @@ Harness.test("per-play context reaches every authored callback", function()
 	}
 	local observed = {
 		onPlay = 0,
+		onAddress = 0,
 		run = 0,
 		reverse = 0,
 		update = 0,
@@ -266,6 +284,10 @@ Harness.test("per-play context reaches every authored callback", function()
 			Harness.assertEqual(received, context)
 			observed.onPlay += 1
 		end,
+		onAddress = function(_playback, _info, received)
+			Harness.assertEqual(received, context)
+			observed.onAddress += 1
+		end,
 		onLoop = function(_playback, _change, received)
 			Harness.assertEqual(received, context)
 			observed.onLoop += 1
@@ -277,11 +299,311 @@ Harness.test("per-play context reaches every authored callback", function()
 	clock:setRate(-1)
 	clock:stepRootTo(2.25, PHASE)
 	Harness.assertEqual(observed.onPlay, 1)
+	Harness.assertEqual(observed.onAddress, 1)
 	Harness.assertTrue(observed.run >= 1)
 	Harness.assertTrue(observed.reverse >= 1)
 	Harness.assertTrue(observed.update >= 1)
 	Harness.assertTrue(observed.onLoop >= 1)
 	playback:cancel()
+end)
+
+Harness.test("address materialization distinguishes reconstruction from skip", function()
+	local reconstructedOrder: { string } = {}
+	local reconstructedUpdates = 0
+	local reconstructedInfo: AddressInfo? = nil
+	local reconstructedClock = FakeClock.new()
+	local reconstructed = createPlayback(reconstructedClock, {
+		duration = 1,
+		events = {
+			{
+				time = 0.2,
+				run = function()
+					table.insert(reconstructedOrder, "event")
+				end,
+			},
+		},
+		updates = {
+			{
+				startTime = 0.1,
+				endTime = 0.9,
+				run = function()
+					reconstructedUpdates += 1
+				end,
+			},
+		},
+		onPlay = function()
+			table.insert(reconstructedOrder, "play")
+		end,
+		onAddress = function(playback, info)
+			reconstructedInfo = info
+			Harness.assertNear(playback:getPosition().timePosition, 0.7)
+			Harness.assertThrows(function()
+				info.target.timePosition = 0
+			end)
+			table.insert(reconstructedOrder, `address:{info.cause}:{info.mode}`)
+		end,
+	}, {
+		position = { timePosition = 0.7 },
+	})
+	reconstructed:play()
+	Harness.assertArrayEqual(reconstructedOrder, { "play", "event", "address:initial:reconstruct" })
+	Harness.assertEqual(reconstructedUpdates, 0)
+	Harness.assertEqual((reconstructedInfo :: AddressInfo).from, nil)
+	Harness.assertNear((reconstructedInfo :: AddressInfo).target.timePosition, 0.7)
+	reconstructed:cancel()
+
+	local skippedOrder: { string } = {}
+	local skippedEvents = 0
+	local skippedUpdates = 0
+	local skippedClock = FakeClock.new()
+	local skipped = createPlayback(skippedClock, {
+		duration = 1,
+		events = {
+			{
+				time = 0.2,
+				run = function()
+					skippedEvents += 1
+				end,
+			},
+			{
+				time = 0.7,
+				run = function()
+					skippedEvents += 1
+				end,
+			},
+			{
+				time = 0.75,
+				run = function()
+					skippedEvents += 1
+				end,
+			},
+		},
+		updates = {
+			{
+				startTime = 0.1,
+				endTime = 0.9,
+				run = function()
+					skippedUpdates += 1
+				end,
+			},
+		},
+		onPlay = function()
+			table.insert(skippedOrder, "play")
+		end,
+		onAddress = function(playback, info)
+			Harness.assertEqual(info.cause, "initial")
+			Harness.assertEqual(info.mode, "skip")
+			Harness.assertEqual(info.from, nil)
+			Harness.assertNear(info.target.timePosition, 0.7)
+			Harness.assertNear(playback:getPosition().timePosition, info.target.timePosition)
+			table.insert(skippedOrder, "address")
+		end,
+	}, {
+		position = { timePosition = 0.7 },
+		initialMode = "skip",
+	})
+	skipped:play()
+	Harness.assertArrayEqual(skippedOrder, { "play", "address" })
+	Harness.assertEqual(skippedEvents, 0)
+	Harness.assertEqual(skippedUpdates, 0)
+	Harness.assertEqual(skippedClock:getPhaseBindingCount(), 1)
+	skippedClock:stepRootTo(0.1, PHASE)
+	Harness.assertEqual(skippedEvents, 1)
+	skipped:cancel()
+
+	local instantOrder: { string } = {}
+	local instantClock = FakeClock.new({ rate = 0 })
+	local instant = createPlayback(instantClock, {
+		duration = 0,
+		events = {
+			{
+				time = 0,
+				run = function()
+					table.insert(instantOrder, "event")
+				end,
+			},
+		},
+		onPlay = function()
+			table.insert(instantOrder, "play")
+		end,
+		onAddress = function(_playback, info)
+			Harness.assertEqual(info.mode, "skip")
+			table.insert(instantOrder, "address")
+		end,
+	}, {
+		initialMode = "skip",
+	})
+	instant:play()
+	Harness.assertArrayEqual(instantOrder, { "play", "address" })
+	Harness.assertEqual(instant:getStatus(), "completed")
+	Harness.assertEqual(instantClock:getTaskCount(), 0)
+end)
+
+Harness.test("address callbacks serialize seeks and report discontinuity baselines", function()
+	local seekClock = FakeClock.new()
+	local seekOrder: { string } = {}
+	local seekInfos: { AddressInfo } = {}
+	local skippedEvents = 0
+	local cleanups = 0
+	local seekPlayback = createPlayback(seekClock, {
+		duration = 1,
+		addressPolicy = "skip",
+		events = {
+			{
+				time = 0.5,
+				run = function()
+					skippedEvents += 1
+				end,
+			},
+		},
+		onPlay = function(playback)
+			playback:addCleanup(function()
+				cleanups += 1
+			end)
+		end,
+		onAddress = function(playback, info)
+			table.insert(seekInfos, info)
+			if info.cause == "seek" and info.target.timePosition == 0.75 then
+				table.insert(seekOrder, "outer:start")
+				Harness.assertTrue(playback:seek({ timePosition = 0.25 }))
+				table.insert(seekOrder, "outer:end")
+			elseif info.cause == "seek" then
+				table.insert(seekOrder, "inner")
+			end
+		end,
+	})
+	seekPlayback:play()
+	seekClock:advanceRootTo(0.3)
+	Harness.assertTrue(seekPlayback:seek({ timePosition = 0.75 }))
+	Harness.assertArrayEqual(seekOrder, { "outer:start", "outer:end", "inner" })
+	Harness.assertEqual(#seekInfos, 3)
+	Harness.assertNear((seekInfos[2].from :: PlaybackPosition).timePosition, 0.3)
+	Harness.assertNear(seekInfos[2].target.timePosition, 0.75)
+	Harness.assertNear((seekInfos[3].from :: PlaybackPosition).timePosition, 0.75)
+	Harness.assertNear(seekInfos[3].target.timePosition, 0.25)
+	Harness.assertNear(seekPlayback:getPosition().timePosition, 0.25)
+	Harness.assertEqual(skippedEvents, 0)
+	Harness.assertEqual(cleanups, 0)
+	seekPlayback:cancel()
+	Harness.assertEqual(cleanups, 1)
+
+	local discontinuityClock = FakeClock.new()
+	local discontinuityInfos: { AddressInfo } = {}
+	local naturalEvents = 0
+	local historicalEvents = 0
+	local discontinuity = createPlayback(discontinuityClock, {
+		duration = 1,
+		addressPolicy = "skip",
+		events = {
+			{
+				time = 0.2,
+				run = function()
+					naturalEvents += 1
+				end,
+			},
+			{
+				time = 0.5,
+				run = function()
+					historicalEvents += 1
+				end,
+			},
+		},
+		onAddress = function(_playback, info)
+			table.insert(discontinuityInfos, info)
+		end,
+	})
+	discontinuity:play()
+	discontinuityClock:advanceRootTo(0.3)
+	discontinuityClock:jumpTo(0.8)
+	Harness.assertEqual(#discontinuityInfos, 2)
+	local jumpInfo = discontinuityInfos[2]
+	Harness.assertEqual(jumpInfo.cause, "clockDiscontinuity")
+	Harness.assertEqual(jumpInfo.mode, "skip")
+	Harness.assertNear((jumpInfo.from :: PlaybackPosition).timePosition, 0.3)
+	Harness.assertNear(jumpInfo.target.timePosition, 0.8)
+	Harness.assertEqual(naturalEvents, 1)
+	Harness.assertEqual(historicalEvents, 0)
+	discontinuity:cancel()
+end)
+
+Harness.test("rebuild address callback follows replay in a fresh generation", function()
+	local clock = FakeClock.new()
+	local order: { string } = {}
+	local infos: { AddressInfo } = {}
+	local cleanupCount = 0
+	local updateCount = 0
+	local playback = createPlayback(clock, {
+		duration = 1,
+		addressPolicy = "rebuild",
+		events = {
+			{
+				time = 0.2,
+				run = function()
+					table.insert(order, "event")
+				end,
+			},
+		},
+		updates = {
+			{
+				startTime = 0.1,
+				endTime = 0.9,
+				run = function()
+					updateCount += 1
+				end,
+			},
+		},
+		onPlay = function(control)
+			table.insert(order, `play:{control:getPosition().timePosition}`)
+			control:addCleanup(function()
+				cleanupCount += 1
+				table.insert(order, "cleanup")
+			end)
+		end,
+		onAddress = function(_control, info)
+			table.insert(infos, info)
+			table.insert(order, `address:{info.cause}:{info.mode}`)
+		end,
+	})
+	playback:play()
+	order = {}
+	Harness.assertTrue(playback:seek({ timePosition = 0.75 }))
+	Harness.assertArrayEqual(order, { "cleanup", "play:0.75", "event", "address:seek:reconstruct" })
+	Harness.assertEqual(#infos, 2)
+	Harness.assertNear((infos[2].from :: PlaybackPosition).timePosition, 0)
+	Harness.assertNear(infos[2].target.timePosition, 0.75)
+	Harness.assertEqual(cleanupCount, 1)
+	Harness.assertEqual(updateCount, 0)
+	playback:cancel()
+	Harness.assertEqual(cleanupCount, 2)
+end)
+
+Harness.test("address callback failures are terminal and cancelled addresses are silent", function()
+	local failureClock = FakeClock.new()
+	local failed = createPlayback(failureClock, {
+		duration = 1,
+		onAddress = function()
+			error("materialization failed")
+		end,
+	})
+	failed:play()
+	Harness.assertEqual(failed:getCompletion().status, "failed")
+	Harness.assertEqual(failed:getCompletion().reason, "callbackFailed")
+	Harness.assertEqual(failureClock:getTaskCount(), 0)
+
+	local cancelClock = FakeClock.new()
+	local addressCalls = 0
+	local cancelled = createPlayback(cancelClock, {
+		duration = 1,
+		addressPolicy = "cancel",
+		onAddress = function()
+			addressCalls += 1
+		end,
+	})
+	cancelled:play()
+	Harness.assertEqual(addressCalls, 1)
+	cancelClock:jumpTo(0.5)
+	Harness.assertEqual(cancelled:getCompletion().status, "cancelled")
+	Harness.assertEqual(addressCalls, 1)
 end)
 
 Harness.test("zero-duration playback runs once and completes without scheduling", function()

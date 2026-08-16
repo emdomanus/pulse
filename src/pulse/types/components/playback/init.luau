@@ -6,6 +6,7 @@ local DefTypes = require(script.Parent.Parent.def)
 local SequenceTypes = require(script.Parent.sequence)
 local TemporalAdapterTypes = require(script.Parent.Parent.managers.temporalAdapter)
 
+type AddressMode = DefTypes.AddressMode
 type ClockChange = TemporalAdapterTypes.ClockChange
 type ClockSample = TemporalAdapterTypes.ClockSample
 type Completion = DefTypes.Completion
@@ -38,6 +39,7 @@ export type LoopedBinding = {
 export type PlaybackOptions = {
 	playbackSpeed: number?,
 	position: SequenceAddress?,
+	initialMode: AddressMode?,
 }
 
 export type ClockChangeOperation = {
@@ -121,6 +123,7 @@ export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackSink & {
 	_clockRate: number,
 	_position: PlaybackPosition,
 	_initialPosition: PlaybackPosition,
+	_initialMode: AddressMode,
 	_boundaryState: BoundaryState?,
 	_direction: TraversalDirection?,
 	_scheduledId: ScheduledTaskId?,

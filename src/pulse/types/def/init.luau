@@ -5,6 +5,8 @@
 export type Release = () -> ()
 export type TraversalDirection = "forward" | "backward"
 export type AddressPolicy = "skip" | "rebuild" | "cancel"
+export type AddressMode = "reconstruct" | "skip"
+export type AddressCause = "initial" | "seek" | "clockDiscontinuity"
 
 export type SequenceAddress = {
 	timePosition: number,
@@ -15,6 +17,13 @@ export type PlaybackPosition = {
 	timePosition: number,
 	loopIndex: number,
 	unwrappedTimePosition: number,
+}
+
+export type AddressInfo = {
+	cause: AddressCause,
+	mode: AddressMode,
+	from: PlaybackPosition?,
+	target: PlaybackPosition,
 }
 
 export type LoopChange = {

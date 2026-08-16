@@ -61,6 +61,7 @@ type SequenceDefinition<ContextT> = {
 	events: { Event<ContextT> }?,
 	updates: { Update<ContextT> }?,
 	onPlay: ((playback: PlaybackControl, context: ContextT) -> ())?,
+	onAddress: ((playback: PlaybackControl, info: AddressInfo, context: ContextT) -> ())?,
 	onLoop: ((playback: PlaybackControl, change: LoopChange, context: ContextT) -> ())?,
 }
 ```
@@ -73,11 +74,33 @@ type SequenceDefinition<ContextT> = {
 | `events` | `{}` | Discrete authored occurrences |
 | `updates` | `{}` | Continuous active intervals |
 | `onPlay` | none | Opens each initial or rebuilt cleanup generation |
+| `onAddress` | none | Materializes state after a successful non-natural position change |
 | `onLoop` | none | Runs at each logical loop crossing before observers |
 
 The compiler clones, validates, sorts, and freezes runtime data. Input arrays must be dense.
 At `duration = 0`, only non-looping instantaneous behavior is valid; no positive update interval can
 fit within the Sequence.
+
+<a id="sequence-definition-on-address"></a>
+### SequenceDefinition.onAddress
+
+```luau
+onAddress: ((
+	playback: PlaybackControl,
+	info: AddressInfo,
+	context: ContextT
+) -> ())?
+```
+
+Runs after Pulse establishes the exact target of an initial placement, accepted seek, or accepted
+clock discontinuity. `info.mode` distinguishes event reconstruction from a silent skip. A cancelled
+address does not invoke the callback.
+
+The callback runs inside Playback's serialized mutation operation. `playback:getPosition()` equals
+`info.target`; a reentrant nonterminal mutation is queued until the callback returns, while a
+terminal request interrupts the remaining operation. Pulse does not synthesize an `Update.run`
+sample during reconstruction or skip, so this callback is the explicit seam for materializing
+host-defined active spans and sampled values.
 
 <a id="sequence"></a>
 ## Sequence

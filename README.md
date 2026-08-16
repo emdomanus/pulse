@@ -40,6 +40,10 @@ playback:play()
 One `TemporalAdapter` may serve many playbacks. Event-only playbacks schedule only their next
 boundary. Updating playbacks lazily share the adapter's single phase binding.
 
+Late materialization can start with `initialMode = "skip"`. Pulse suppresses historical events and
+delivers the exact addressed position through `onAddress`, allowing the host to establish active
+spans and sampled presentation state without replaying one-shot effects.
+
 Pulse has no package dependency on Tempo. A Tempo Clock is one structural provider that a host may
 inject; another scheduling-capable clock can satisfy the same public contract.
 

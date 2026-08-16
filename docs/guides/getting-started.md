@@ -83,6 +83,36 @@ The context argument is required even when its intentional value is `nil`. Its t
 compiled Sequence, so one presentation definition remains reusable while each invocation receives
 its own character, position, camera, audio commands, or other host-owned data.
 
+## Materialize a late playback
+
+Use `onAddress` to compile a state materializer beside the timeline and select `initialMode =
+"skip"` when joining an already-running effect:
+
+```luau
+local sequence = builder
+	:duration(1.2)
+	:event({
+		time = 0.15,
+		run = function(_playback, context)
+			spawnImpactBurst(context.worldPosition)
+		end,
+	})
+	:onAddress(function(_playback, info, context)
+		materializeActivePresentation(context, info.target.timePosition)
+	end)
+	:compile()
+
+local playback = Pulse.playback(sequence, adapter, context, {
+	position = { timePosition = replicatedAge },
+	initialMode = "skip",
+})
+playback:play()
+```
+
+The impact event is historical and does not run. `onAddress` receives the exact target so the host
+can create only state that should still be active, such as beams, trails, animations, or curve
+values. Pulse does not interpret or own that presentation state.
+
 ## Control a live playback
 
 ```luau
@@ -108,6 +138,7 @@ composition no longer uses that clock/phase pair. Adapter destruction does not d
 
 ## Instantaneous sequences
 
-A non-looping Sequence may have `duration = 0`. Its `onPlay` and time-zero events run synchronously
-inside `Playback:play`, then cleanup and Ended run without scheduling a task or phase binding.
-Zero-duration Sequences cannot loop or contain a valid update interval.
+A non-looping Sequence may have `duration = 0`. Its callbacks run synchronously inside
+`Playback:play`, then cleanup and Ended run without scheduling a task or phase binding. Initial
+`reconstruct` runs time-zero events; initial `skip` suppresses them. Zero-duration Sequences cannot
+loop or contain a valid update interval.

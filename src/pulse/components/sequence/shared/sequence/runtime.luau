@@ -5,6 +5,7 @@
 local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.Parent.types.components.sequence)
 
+type AddressCallback = Types.AddressCallback<unknown>
 type EventCallback = Types.EventCallback<unknown>
 type LoopCallback = Types.LoopCallback<unknown>
 type PlaybackPosition = DefTypes.PlaybackPosition
@@ -29,6 +30,7 @@ type RuntimeModule = {
 	getEvent: (sequence: Sequence, index: number) -> StoredEvent,
 	getUpdates: (sequence: Sequence) -> { StoredUpdate },
 	getOnPlay: (sequence: Sequence) -> EventCallback?,
+	getOnAddress: (sequence: Sequence) -> AddressCallback?,
 	getOnLoop: (sequence: Sequence) -> LoopCallback?,
 }
 
@@ -296,6 +298,10 @@ local function getOnPlay(sequence: Sequence): EventCallback?
 	return asSequenceImpl(sequence)._onPlay
 end
 
+local function getOnAddress(sequence: Sequence): AddressCallback?
+	return asSequenceImpl(sequence)._onAddress
+end
+
 local function getOnLoop(sequence: Sequence): LoopCallback?
 	return asSequenceImpl(sequence)._onLoop
 end
@@ -309,6 +315,7 @@ local module: RuntimeModule = {
 	getEvent = getEvent,
 	getUpdates = getUpdates,
 	getOnPlay = getOnPlay,
+	getOnAddress = getOnAddress,
 	getOnLoop = getOnLoop,
 }
 

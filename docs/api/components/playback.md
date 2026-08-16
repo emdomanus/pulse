@@ -21,16 +21,19 @@ per-play context delivered to every authored callback.
 type PlaybackOptions = {
 	playbackSpeed: number?,
 	position: SequenceAddress?,
+	initialMode: AddressMode?,
 }
 ```
 
 | Field | Default | Description |
 | --- | --- | --- |
 | `playbackSpeed` | `1` | Finite sequence-local clock-displacement multiplier |
-| `position` | `{ timePosition = 0 }` | Initial address reconstructed when play begins |
+| `position` | `{ timePosition = 0 }` | Initial address established when play begins |
+| `initialMode` | `"reconstruct"` | Replays history or skips directly to the initial address |
 
 Negative speed reverses traversal, and zero speed makes the Playback dormant without pausing its
-lifecycle. For looping Sequences, `position.loopIndex` selects the exact logical cycle.
+lifecycle. For looping Sequences, `position.loopIndex` selects the exact logical cycle. Use
+`initialMode = "skip"` for a late materialization that must not emit historical events.
 
 <a id="playback-control"></a>
 ## PlaybackControl
@@ -134,7 +137,7 @@ context; the host owns any objects and capabilities it contains. Pulse releases 
 reference after terminal cleanup and before Ended observers run.
 
 Construction does not read, attach to, or schedule against the clock until `Playback:play`. An
-invalid initial speed or address raises during construction.
+invalid initial speed, address, or mode raises during construction.
 
 <a id="playback-play"></a>
 ### Playback:play
@@ -143,12 +146,15 @@ invalid initial speed or address raises during construction.
 Playback:play() -> Playback
 ```
 
-Starts an idle Playback, attaches to the adapter, opens the first setup/cleanup generation, and
-reconstructs authored events from the current loop's zero boundary to the initial position. It then
-schedules the next boundary and joins continuous execution only if update work requires it.
+Starts an idle Playback, attaches to the adapter, and opens the first setup/cleanup generation. In
+`reconstruct` mode it replays authored events from the current loop's zero boundary to the initial
+position. In `skip` mode it establishes the position without running historical events, including
+events exactly at the target. It then invokes `onAddress`, schedules the next future boundary, and
+joins continuous execution only if update work requires it.
 
-For a non-looping zero-duration Sequence, `onPlay` and time-zero events run during this call, then
-the Playback completes, drains cleanup, and emits Ended synchronously without scheduling.
+For a non-looping zero-duration Sequence, the Playback completes, drains cleanup, and emits Ended
+synchronously without scheduling. `reconstruct` runs time-zero events; `skip` suppresses them. Both
+modes run `onPlay` followed by `onAddress` when authored.
 
 Calling `play` after the Playback has left `idle` is an idempotent no-op. A terminal Playback cannot
 be replayed; construct another Playback from the same Sequence.
@@ -209,6 +215,10 @@ Validates the address, reconciles live timeline work, and applies the Sequence's
 | `skip` | Moves the cursor without replaying events or replacing the cleanup generation |
 | `rebuild` | Disposes the current generation, calls `onPlay`, and replays forward from local zero to the target |
 | `cancel` | Completes the Playback as `cancelled` with reason `seekCancelled` |
+
+After a successful `skip` or `rebuild`, Pulse invokes `onAddress` with cause `seek`. For `rebuild`,
+the callback runs after replay in the fresh generation. For `skip`, it runs without cleanup and may
+reconcile host-owned leases in place.
 
 Returns `true` when an active Playback accepted the request for serialized processing. Returns
 `false` for idle, terminal, or currently terminating Playbacks. Invalid addresses raise.

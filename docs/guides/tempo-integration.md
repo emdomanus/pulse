@@ -39,7 +39,9 @@ updating playbacks on the same adapter do not bind the Tempo phase independently
 
 Tempo rate changes are continuous mapping changes: Pulse reconciles to the change boundary,
 preserves playback position, and reschedules. Tempo seeks or hydration jumps are discontinuities:
-Pulse applies the Sequence's `skip`, `rebuild`, or `cancel` address policy.
+Pulse applies the Sequence's `skip`, `rebuild`, or `cancel` address policy. A successful `skip` or
+`rebuild` invokes the Sequence's `onAddress` callback with cause `clockDiscontinuity` after the exact
+target is established.
 
 The Tempo clock and runtime remain host-owned. Destroying a Pulse adapter only releases Pulse's
 changed subscription, phase binding, scheduled tasks, and attached playbacks.

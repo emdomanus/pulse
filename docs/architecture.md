@@ -49,6 +49,22 @@ Continuous clock mapping changes reconcile to the change boundary before re-anch
 discontinuous change uses the sequence's
 [`AddressPolicy`](./api/types/definitions.md#address-policy).
 
+## Address materialization
+
+Natural traversal executes events and updates. Initial placement, manual seeks, and discontinuous
+clock changes are address operations. Each successful address reports an immutable
+[`AddressInfo`](./api/types/definitions.md#address-info) after the exact target cursor is established
+and before the Playback re-anchors and refreshes scheduling.
+
+| Address mode | Historical events | Cleanup generation |
+| --- | --- | --- |
+| `reconstruct` | Replayed forward from the target loop's zero boundary | Opened initially or replaced by a `rebuild` policy |
+| `skip` | Suppressed, including events exactly at the target | Existing generation retained; initial playback still opens its first generation |
+
+Pulse does not sample updates with a synthetic zero delta during an address. An authored
+`onAddress` callback may instead materialize host-defined active spans, curves, and leases at the
+reported target. Subsequent natural traversal begins from that target.
+
 ## Callback and cleanup ownership
 
 Forward traversal calls `Event.run`; backward traversal calls `Event.reverse` when present. Pulse
@@ -56,8 +72,8 @@ reverses traversal and its own recorded cursor, not arbitrary authored side effe
 callback owns any domain-specific undo.
 
 `Pulse.playback` receives one typed invocation context and retains it for that Playback. The same
-value is passed to event, reverse, update, setup, and authored loop callbacks, allowing one compiled
-Sequence to serve many characters or world invocations without capturing per-play closures. Pulse
+value is passed to event, reverse, update, setup, address, and authored loop callbacks, allowing one
+compiled Sequence to serve many characters or world invocations without capturing per-play closures. Pulse
 releases the retained context after terminal cleanup and before publishing Completion.
 
 `Playback:addCleanup` belongs to the current playback or rebuild generation. Cleanup executes in

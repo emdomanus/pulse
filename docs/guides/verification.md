@@ -27,7 +27,8 @@ also verify the current Studio harness against Roblox execution:
 - repeated forward and backward loops preserve event and loop ordering;
 - exact-boundary direction changes do not double-run or skip callbacks;
 - repeated structured loop seeks keep the requested `timePosition` and `loopIndex`;
-- per-play context identity reaches event, reverse, update, setup, and loop callbacks;
+- per-play context identity reaches event, reverse, update, setup, address, and loop callbacks;
+- late initial skip suppresses historical one-shots while `onAddress` materializes the target state;
 - a zero-duration non-looping Sequence completes synchronously without scheduler ownership;
 - pause, resume, speed changes, cancellation, and adapter destruction release ownership.
 

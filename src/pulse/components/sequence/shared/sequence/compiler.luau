@@ -141,6 +141,10 @@ local function compileDefinition<ContextT>(definition: SequenceDefinition<Contex
 	assert(definition.duration >= 0, "Pulse duration must be nonnegative")
 	assert(not definition.loop or definition.duration > 0, "Pulse looping sequences require duration greater than zero")
 	assert(definition.onPlay == nil or type(definition.onPlay) == "function", "Pulse onPlay must be a callback")
+	assert(
+		definition.onAddress == nil or type(definition.onAddress) == "function",
+		"Pulse onAddress must be a callback"
+	)
 	assert(definition.onLoop == nil or type(definition.onLoop) == "function", "Pulse onLoop must be a callback")
 
 	local events = compileEvents(definition)
@@ -155,6 +159,7 @@ local function compileDefinition<ContextT>(definition: SequenceDefinition<Contex
 		_updates = updates,
 		_boundaries = compileBoundaries(definition.duration, events, updates),
 		_onPlay = definition.onPlay,
+		_onAddress = definition.onAddress,
 		_onLoop = definition.onLoop,
 	}
 end

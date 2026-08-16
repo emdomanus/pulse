@@ -43,6 +43,9 @@ A continuous change preserves mapping continuity and is reconciled before Pulse 
 discontinuous change applies the Sequence's AddressPolicy. Provider notifications may expose
 revision under their current mapping; the adapter normalizes it into this record.
 
+For a successful discontinuity, Playback reports the resulting target through the Sequence's
+`onAddress` callback. The adapter remains unaware of authored materialization behavior.
+
 <a id="direction-tokens"></a>
 ## DirectionTokens
 

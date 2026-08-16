@@ -10,6 +10,9 @@ local SequenceRuntime = require(script.Parent.Parent.Parent.sequence.shared.sequ
 local TemporalAdapter = require(script.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 
 type AddressPolicy = DefTypes.AddressPolicy
+type AddressCause = DefTypes.AddressCause
+type AddressInfo = DefTypes.AddressInfo
+type AddressMode = DefTypes.AddressMode
 type BoundaryState = PlaybackTypes.BoundaryState
 type ClockChange = TemporalAdapterTypes.ClockChange
 type ClockSample = TemporalAdapterTypes.ClockSample
@@ -62,6 +65,12 @@ local reconcileSample: (self: PlaybackImpl, sample: ClockSample, preserveTask: b
 
 local function isFinite(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function validateInitialMode(mode: AddressMode?): AddressMode
+	local resolved: AddressMode = if mode == nil then "reconstruct" :: AddressMode else mode
+	assert(resolved == "reconstruct" or resolved == "skip", "Pulse initialMode must be 'reconstruct' or 'skip'")
+	return resolved
 end
 
 local function directionFor(rate: number, speed: number): TraversalDirection?
@@ -208,6 +217,31 @@ local function invokeEvent(self: PlaybackImpl, callback: (PlaybackControl, unkno
 		return false
 	end
 	if not pcall(callback, asControl(self), self._context) then
+		requestTerminal(self, "failed", "callbackFailed")
+		return false
+	end
+	return self._terminalRequest == nil and self._completion == nil
+end
+
+local function emitAddress(self: PlaybackImpl, cause: AddressCause, mode: AddressMode, from: PlaybackPosition?): boolean
+	local authored = SequenceRuntime.getOnAddress(self._sequence)
+	if authored == nil then
+		return true
+	end
+	self._workCount += 1
+	if self._workCount > MAX_RECONCILIATION_WORK then
+		requestTerminal(self, "failed", "catchUpLimitExceeded")
+		return false
+	end
+	local immutableFrom: PlaybackPosition? = if from == nil then nil else table.freeze(publicPosition(from))
+	local immutableTarget: PlaybackPosition = table.freeze(publicPosition(self._position))
+	local info: AddressInfo = table.freeze({
+		cause = cause,
+		mode = mode,
+		from = immutableFrom,
+		target = immutableTarget,
+	})
+	if not pcall(authored, asControl(self), info, self._context) then
 		requestTerminal(self, "failed", "callbackFailed")
 		return false
 	end
@@ -696,7 +730,7 @@ end
 
 -- Discontinuities and reconstruction
 
-local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean): boolean
+local function beginGeneration(self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean): boolean
 	if disposeCurrent and not disposeGeneration(self) then
 		requestTerminal(self, "failed", "cleanupFailed")
 		return false
@@ -707,6 +741,13 @@ local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, dispo
 	self._position = target
 	local onPlay = SequenceRuntime.getOnPlay(self._sequence)
 	if onPlay ~= nil and not invokeEvent(self, onPlay) then
+		return false
+	end
+	return true
+end
+
+local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean): boolean
+	if not beginGeneration(self, target, disposeCurrent) then
 		return false
 	end
 	local base = SequenceRuntime.validateAddress(self._sequence, {
@@ -731,19 +772,7 @@ local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, dispo
 	return true
 end
 
-local function applyAddressTarget(
-	self: PlaybackImpl,
-	target: PlaybackPosition,
-	policy: AddressPolicy,
-	reason: string
-): boolean
-	if policy == "cancel" then
-		requestTerminal(self, "cancelled", reason)
-		return false
-	elseif policy == "rebuild" then
-		return reconstructTo(self, target, true)
-	end
-
+local function placeWithoutTraversal(self: PlaybackImpl, target: PlaybackPosition)
 	local boundary = SequenceRuntime.boundaryAt(self._sequence, target)
 	self._position = boundary or target
 	local direction = desiredDirection(self)
@@ -753,7 +782,30 @@ local function applyAddressTarget(
 		self._boundaryState = nil
 	end
 	self._updateCursor = self._position.unwrappedTimePosition
-	return true
+end
+
+local function applyAddressTarget(
+	self: PlaybackImpl,
+	target: PlaybackPosition,
+	policy: AddressPolicy,
+	reason: string,
+	cause: AddressCause
+): boolean
+	if policy == "cancel" then
+		requestTerminal(self, "cancelled", reason)
+		return false
+	end
+
+	local from = publicPosition(self._position)
+	if policy == "rebuild" then
+		if not reconstructTo(self, target, true) then
+			return false
+		end
+		return emitAddress(self, cause, "reconstruct" :: AddressMode, from)
+	else
+		placeWithoutTraversal(self, target)
+		return emitAddress(self, cause, "skip" :: AddressMode, from)
+	end
 end
 
 local function advanceClockPosition(self: PlaybackImpl, clockPosition: number): boolean
@@ -801,7 +853,13 @@ local function applyClockChange(self: PlaybackImpl, change: ClockChange, sample:
 	end
 	if change.discontinuous then
 		if
-			not applyAddressTarget(self, changeTargetPosition, self._sequence:getAddressPolicy(), "clockDiscontinuity")
+			not applyAddressTarget(
+				self,
+				changeTargetPosition,
+				self._sequence:getAddressPolicy(),
+				"clockDiscontinuity",
+				"clockDiscontinuity" :: AddressCause
+			)
 		then
 			return
 		end
@@ -963,7 +1021,15 @@ local function applySeek(self: PlaybackImpl, address: SequenceAddress, sample: C
 		self._appliedClockSerial = math.max(self._appliedClockSerial, clockSerial)
 		self._clockRate = sample.rate
 	end
-	if not applyAddressTarget(self, validated, self._sequence:getAddressPolicy(), "seekCancelled") then
+	if
+		not applyAddressTarget(
+			self,
+			validated,
+			self._sequence:getAddressPolicy(),
+			"seekCancelled",
+			"seek" :: AddressCause
+		)
+	then
 		return
 	end
 	reanchor(self, sample)
@@ -1078,6 +1144,7 @@ local function ConstructPlayback<ContextT>(
 ): Playback
 	local config: PlaybackOptions = options or {}
 	local speed = config.playbackSpeed or 1
+	local initialMode = validateInitialMode(config.initialMode)
 	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
 	local storedSequence = (sequence :: unknown) :: StoredSequence
 	local initial = SequenceRuntime.validateAddress(storedSequence, config.position or { timePosition = 0 })
@@ -1105,6 +1172,7 @@ local function ConstructPlayback<ContextT>(
 			_clockRate = 0,
 			_position = initial,
 			_initialPosition = initial,
+			_initialMode = initialMode,
 			_boundaryState = nil,
 			_direction = nil,
 			_scheduledId = nil,
@@ -1152,7 +1220,18 @@ function Playback.play(self: PlaybackImpl): Playback
 
 	self._busy = true
 	self._workCount = 0
-	reconstructTo(self, self._initialPosition, false)
+	local initialized: boolean
+	if self._initialMode == "reconstruct" then
+		initialized = reconstructTo(self, self._initialPosition, false)
+	else
+		initialized = beginGeneration(self, self._initialPosition, false)
+		if initialized then
+			placeWithoutTraversal(self, self._initialPosition)
+		end
+	end
+	if initialized then
+		emitAddress(self, "initial" :: AddressCause, self._initialMode, nil)
+	end
 	if self._terminalRequest == nil and self._sequence:getDuration() == 0 then
 		requestTerminal(self, "completed", nil)
 	end

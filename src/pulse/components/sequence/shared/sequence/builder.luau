@@ -6,6 +6,7 @@ local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.Parent.types.components.sequence)
 
 type AddressPolicy = DefTypes.AddressPolicy
+type AddressCallback<ContextT> = Types.AddressCallback<ContextT>
 type Builder<ContextT> = Types.Builder<ContextT>
 type BuilderImpl<ContextT> = Types.BuilderImpl<ContextT>
 type Event<ContextT> = Types.Event<ContextT>
@@ -32,6 +33,7 @@ local function ConstructBuilder<ContextT>(constructSequence: SequenceConstructor
 			_events = {},
 			_updates = {},
 			_onPlay = nil,
+			_onAddress = nil,
 			_onLoop = nil,
 		}, Builder) :: unknown
 	) :: BuilderImpl<ContextT>
@@ -76,6 +78,11 @@ function Builder.onPlay<ContextT>(self: BuilderImpl<ContextT>, callback: EventCa
 	return self
 end
 
+function Builder.onAddress<ContextT>(self: BuilderImpl<ContextT>, callback: AddressCallback<ContextT>): Builder<ContextT>
+	self._onAddress = callback
+	return self
+end
+
 function Builder.onLoop<ContextT>(self: BuilderImpl<ContextT>, callback: LoopCallback<ContextT>): Builder<ContextT>
 	self._onLoop = callback
 	return self
@@ -91,6 +98,7 @@ function Builder.compile<ContextT>(self: BuilderImpl<ContextT>): Sequence<Contex
 		events = self._events,
 		updates = self._updates,
 		onPlay = self._onPlay,
+		onAddress = self._onAddress,
 		onLoop = self._onLoop,
 	})
 end

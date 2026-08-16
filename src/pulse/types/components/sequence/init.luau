@@ -4,12 +4,14 @@
 
 local DefTypes = require(script.Parent.Parent.def)
 
+type AddressInfo = DefTypes.AddressInfo
 type AddressPolicy = DefTypes.AddressPolicy
 type LoopChange = DefTypes.LoopChange
 type PlaybackControl = DefTypes.PlaybackControl
 type TraversalDirection = DefTypes.TraversalDirection
 
 export type EventCallback<ContextT> = (playback: PlaybackControl, context: ContextT) -> ()
+export type AddressCallback<ContextT> = (playback: PlaybackControl, info: AddressInfo, context: ContextT) -> ()
 export type UpdateCallback<ContextT> = (
 	playback: PlaybackControl,
 	dt: number,
@@ -57,6 +59,7 @@ export type SequenceDefinition<ContextT> = {
 	events: { Event<ContextT> }?,
 	updates: { Update<ContextT> }?,
 	onPlay: EventCallback<ContextT>?,
+	onAddress: AddressCallback<ContextT>?,
 	onLoop: LoopCallback<ContextT>?,
 }
 
@@ -79,6 +82,7 @@ export type SequenceState<ContextT> = {
 	_updates: { CompiledUpdate<ContextT> },
 	_boundaries: { number },
 	_onPlay: EventCallback<ContextT>?,
+	_onAddress: AddressCallback<ContextT>?,
 	_onLoop: LoopCallback<ContextT>?,
 }
 
@@ -91,6 +95,7 @@ export type Builder<ContextT> = {
 	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
 	update: (self: Builder<ContextT>, update: Update<ContextT>) -> Builder<ContextT>,
 	onPlay: (self: Builder<ContextT>, callback: EventCallback<ContextT>) -> Builder<ContextT>,
+	onAddress: (self: Builder<ContextT>, callback: AddressCallback<ContextT>) -> Builder<ContextT>,
 	onLoop: (self: Builder<ContextT>, callback: LoopCallback<ContextT>) -> Builder<ContextT>,
 	compile: (self: Builder<ContextT>) -> Sequence<ContextT>,
 }
@@ -103,6 +108,7 @@ export type BuilderImpl<ContextT> = Builder<ContextT> & {
 	_events: { Event<ContextT> },
 	_updates: { Update<ContextT> },
 	_onPlay: EventCallback<ContextT>?,
+	_onAddress: AddressCallback<ContextT>?,
 	_onLoop: LoopCallback<ContextT>?,
 }
 

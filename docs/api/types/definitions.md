@@ -41,6 +41,26 @@ type AddressPolicy = "skip" | "rebuild" | "cancel"
 
 Normal continuous traversal and clock-rate changes do not use this policy.
 
+<a id="address-mode"></a>
+## AddressMode
+
+```luau
+type AddressMode = "reconstruct" | "skip"
+```
+
+The behavior actually used to establish a non-natural playback position. `reconstruct` replays
+authored events forward from local zero; `skip` changes the cursor without executing historical
+events.
+
+<a id="address-cause"></a>
+## AddressCause
+
+```luau
+type AddressCause = "initial" | "seek" | "clockDiscontinuity"
+```
+
+Identifies why Pulse established a playback position without normal traversal.
+
 <a id="sequence-address"></a>
 ## SequenceAddress
 
@@ -76,6 +96,23 @@ type PlaybackPosition = {
 | `unwrappedTimePosition` | Unwrapped sequence coordinate used by traversal and anchors |
 
 Playback returns a fresh record so callers cannot mutate internal cursor state.
+
+<a id="address-info"></a>
+## AddressInfo
+
+```luau
+type AddressInfo = {
+	cause: AddressCause,
+	mode: AddressMode,
+	from: PlaybackPosition?,
+	target: PlaybackPosition,
+}
+```
+
+An immutable address report delivered to `SequenceDefinition.onAddress`. `from` is `nil` for the
+initial placement. For a seek it is the reconciled pre-seek cursor; for a clock discontinuity it is
+the cursor after Pulse catches up to the provider's pre-change position. `target` preserves exact
+loop and authored-boundary identity. The nested position records are immutable as well.
 
 <a id="loop-change"></a>
 ## LoopChange
