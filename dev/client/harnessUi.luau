@@ -1,11 +1,11 @@
 --!strict
 
-export type ScenarioKey = "rebuild" | "skip" | "cancel" | "loop"
+export type ScenarioKey = "reconstruct" | "skip" | "cancel" | "loop"
 
 export type ViewModel = {
 	scenarioKey: ScenarioKey,
 	scenarioLabel: string,
-	policy: string,
+	mode: string,
 	status: string,
 	position: number,
 	duration: number,
@@ -16,13 +16,13 @@ export type ViewModel = {
 	changedBindings: number,
 	phaseBindings: number,
 	eventCount: number,
-	updateCount: number,
+	sampleCount: number,
 	lastEvent: string,
 	lastEventDirection: "forward" | "reverse" | "neutral",
 }
 
 export type Callbacks = {
-	selectRebuild: () -> (),
+	selectReconstruct: () -> (),
 	selectSkip: () -> (),
 	selectCancel: () -> (),
 	selectLoop: () -> (),
@@ -335,12 +335,17 @@ function Ui.new(playerGui: PlayerGui, callbacks: Callbacks): Controller
 	timelinePlayhead.Parent = track
 	addCorner(timelinePlayhead, 2)
 
-	local scenarioContent = createSection(panel, "Scenarios", "Discontinuity policy", 4, 0.13)
+	local scenarioContent = createSection(panel, "Scenarios", "Driver discontinuity mode", 4, 0.13)
 	addGrid(scenarioContent, 2, 2)
 	local scenarioButtons: { [ScenarioKey]: TextButton } = {
-		rebuild = createButton(scenarioContent, "Rebuild", "REBUILD  · replay state", callbacks.selectRebuild),
+		reconstruct = createButton(
+			scenarioContent,
+			"Reconstruct",
+			"RECONSTRUCT  · replay state",
+			callbacks.selectReconstruct
+		),
 		skip = createButton(scenarioContent, "Skip", "SKIP  · jump cleanly", callbacks.selectSkip),
-		cancel = createButton(scenarioContent, "Cancel", "CANCEL  · end on seek", callbacks.selectCancel),
+		cancel = createButton(scenarioContent, "Cancel", "CANCEL  · end on clock jump", callbacks.selectCancel),
 		loop = createButton(scenarioContent, "Loop", "LOOP  · repeat traversal", callbacks.selectLoop),
 	}
 
@@ -365,7 +370,7 @@ function Ui.new(playerGui: PlayerGui, callbacks: Callbacks): Controller
 	createButton(seekContent, "ClockBackward", "CLOCK −1.5s", callbacks.clockBackward)
 	createButton(seekContent, "ClockForward", "CLOCK +1.5s", callbacks.clockForward)
 
-	local logContent = createSection(panel, "Log", "Event, update, loop, cleanup, completion", 7, 0.205)
+	local logContent = createSection(panel, "Log", "Event, sample, loop, cleanup, completion", 7, 0.205)
 	local logLabel = createTextLabel(logContent, "Lines", "")
 	logLabel.Size = UDim2.fromScale(1, 1)
 	logLabel.Font = Enum.Font.RobotoMono
@@ -403,7 +408,7 @@ function Ui.new(playerGui: PlayerGui, callbacks: Callbacks): Controller
 end
 
 function Ui.update(self: ControllerImpl, viewModel: ViewModel)
-	self._statusLabels.scenario.Text = `{viewModel.scenarioLabel:upper()}  ·  {viewModel.policy}`
+	self._statusLabels.scenario.Text = `{viewModel.scenarioLabel:upper()}  ·  {viewModel.mode}`
 	self._statusLabels.playback.Text =
 		`{viewModel.status:upper()}  ·  speed {string.format("%+.2f", viewModel.playbackSpeed)}×`
 	self._statusLabels.position.Text =
@@ -425,7 +430,7 @@ function Ui.update(self: ControllerImpl, viewModel: ViewModel)
 		else COLORS.muted
 	self._timelinePlayhead.BackgroundColor3 = directionColor
 	self._timelineEvent.TextColor3 = directionColor
-	self._timelineEvent.Text = `{viewModel.lastEvent}  ·  E{viewModel.eventCount} / U{viewModel.updateCount}`
+	self._timelineEvent.Text = `{viewModel.lastEvent}  ·  E{viewModel.eventCount} / S{viewModel.sampleCount}`
 
 	for key, button in self._scenarioButtons do
 		local selected = key == viewModel.scenarioKey

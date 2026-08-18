@@ -4,9 +4,13 @@
 
 export type Release = () -> ()
 export type TraversalDirection = "forward" | "backward"
-export type AddressPolicy = "skip" | "rebuild" | "cancel"
 export type AddressMode = "reconstruct" | "skip"
-export type AddressCause = "initial" | "seek" | "clockDiscontinuity"
+export type AddressCause = "initial" | "seek"
+
+export type TimeSample = {
+	position: number,
+	rate: number,
+}
 
 export type SequenceAddress = {
 	timePosition: number,
@@ -17,6 +21,11 @@ export type PlaybackPosition = {
 	timePosition: number,
 	loopIndex: number,
 	unwrappedTimePosition: number,
+}
+
+export type SampleInfo = {
+	position: PlaybackPosition,
+	rate: number,
 }
 
 export type AddressInfo = {
@@ -46,7 +55,7 @@ export type PlaybackControl = {
 	resume: (self: PlaybackControl) -> (),
 	setPlaybackSpeed: (self: PlaybackControl, speed: number) -> (),
 	getPlaybackSpeed: (self: PlaybackControl) -> number,
-	seek: (self: PlaybackControl, address: SequenceAddress) -> boolean,
+	seek: (self: PlaybackControl, address: SequenceAddress, mode: AddressMode) -> boolean,
 	getPosition: (self: PlaybackControl) -> PlaybackPosition,
 	getStatus: (self: PlaybackControl) -> Status,
 	addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),

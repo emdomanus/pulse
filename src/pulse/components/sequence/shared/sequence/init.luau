@@ -2,12 +2,10 @@
 --!optimize 2
 --!native
 
-local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
 local BuilderModule = require(script.builder)
 local Compiler = require(script.compiler)
 
-type AddressPolicy = DefTypes.AddressPolicy
 type Builder<ContextT> = Types.Builder<ContextT>
 type Sequence<ContextT> = Types.Sequence<ContextT>
 type SequenceDefinition<ContextT> = Types.SequenceDefinition<ContextT>
@@ -39,10 +37,6 @@ end
 
 function Sequence.isLooping(self: StoredSequenceImpl): boolean
 	return self._loop
-end
-
-function Sequence.getAddressPolicy(self: StoredSequenceImpl): AddressPolicy
-	return self._addressPolicy
 end
 
 local module: SequenceModule = {

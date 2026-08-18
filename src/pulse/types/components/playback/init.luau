@@ -4,24 +4,18 @@
 
 local DefTypes = require(script.Parent.Parent.def)
 local SequenceTypes = require(script.Parent.sequence)
-local TemporalAdapterTypes = require(script.Parent.Parent.managers.temporalAdapter)
 
 type AddressMode = DefTypes.AddressMode
-type ClockChange = TemporalAdapterTypes.ClockChange
-type ClockSample = TemporalAdapterTypes.ClockSample
 type Completion = DefTypes.Completion
 type LoopChange = DefTypes.LoopChange
 type PlaybackControl = DefTypes.PlaybackControl
 type PlaybackPosition = DefTypes.PlaybackPosition
-type ReachedCallback = TemporalAdapterTypes.ReachedCallback
 type Release = DefTypes.Release
-type ScheduledTaskId = TemporalAdapterTypes.ScheduledTaskId
-type StoredSequence = SequenceTypes.StoredSequence
 type SequenceAddress = DefTypes.SequenceAddress
-type SequenceBoundary = SequenceTypes.SequenceBoundary
+type StoredSequence = SequenceTypes.StoredSequence
 type Status = DefTypes.Status
-type TemporalAdapter = TemporalAdapterTypes.TemporalAdapter
 type TerminalStatus = DefTypes.TerminalStatus
+type TimeSample = DefTypes.TimeSample
 type TraversalDirection = DefTypes.TraversalDirection
 
 export type EndedCallback = (completion: Completion) -> ()
@@ -42,96 +36,69 @@ export type PlaybackOptions = {
 	initialMode: AddressMode?,
 }
 
-export type ClockChangeOperation = {
-	kind: "clockChange",
-	change: ClockChange,
-	sample: ClockSample,
-	clockSerial: number,
-}
-
-export type PhaseOperation = {
-	kind: "phase",
-	sample: ClockSample,
-	clockSerial: number,
-}
-
-export type ReachedOperation = {
-	kind: "reached",
-	sample: ClockSample,
-	clockSerial: number,
+export type EvaluateOperation = {
+	kind: "evaluate",
+	sample: TimeSample,
 }
 
 export type PauseOperation = {
 	kind: "pause",
-	sample: ClockSample,
-	clockSerial: number,
 }
 
 export type ResumeOperation = {
 	kind: "resume",
-	sample: ClockSample,
-	clockSerial: number,
 }
 
 export type SpeedOperation = {
 	kind: "speed",
 	speed: number,
-	sample: ClockSample,
-	clockSerial: number,
 }
 
 export type SeekOperation = {
 	kind: "seek",
 	address: SequenceAddress,
-	sample: ClockSample,
-	clockSerial: number,
+	mode: AddressMode,
 }
 
-export type Operation =
-	ClockChangeOperation
-	| PhaseOperation
-	| ReachedOperation
-	| PauseOperation
-	| ResumeOperation
-	| SpeedOperation
-	| SeekOperation
+export type Operation = EvaluateOperation | PauseOperation | ResumeOperation | SpeedOperation | SeekOperation
 
 export type TerminalRequest = {
 	status: TerminalStatus,
 	reason: string?,
 }
 
-export type BoundaryState = "before" | "after"
+export type BoundaryState = "before" | "after" | "forwardJoinPending" | "backwardJoinPending"
+
+export type TraversalForecast = {
+	phaseRequired: boolean,
+	sourceBoundary: number?,
+	sourceDirection: TraversalDirection?,
+}
 
 export type Playback = PlaybackControl & {
-	play: (self: Playback) -> Playback,
+	play: (self: Playback, sample: TimeSample) -> Playback,
+	evaluate: (self: Playback, sample: TimeSample) -> boolean,
 	onEnded: (self: Playback, callback: EndedCallback) -> Release,
 	onLooped: (self: Playback, callback: LoopedCallback) -> Release,
 	isAlive: (self: Playback) -> boolean,
 	getCompletion: (self: Playback) -> Completion?,
 }
 
-export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackSink & {
+export type PlaybackImpl = Playback & {
 	_sequence: StoredSequence,
 	_context: unknown,
-	_adapter: TemporalAdapter,
 	_status: Status,
 	_completion: Completion?,
 	_playbackSpeed: number,
-	_anchorClock: number,
+	_anchorSource: number,
 	_anchorSequence: number,
-	_clockRate: number,
+	_acceptedSample: TimeSample?,
+	_resumePending: boolean,
 	_position: PlaybackPosition,
 	_initialPosition: PlaybackPosition,
 	_initialMode: AddressMode,
 	_boundaryState: BoundaryState?,
 	_direction: TraversalDirection?,
-	_scheduledId: ScheduledTaskId?,
-	_scheduledDirection: TraversalDirection?,
-	_scheduledBoundary: SequenceBoundary?,
-	_attached: boolean,
-	_updating: boolean,
-	_updateCursor: number,
 	_cleanup: { () -> () },
 	_endedBindings: { EndedBinding },
 	_loopedBindings: { LoopedBinding },
@@ -140,9 +107,7 @@ export type PlaybackImpl = Playback & TemporalAdapterTypes.PlaybackSink & {
 	_finishing: boolean,
 	_deliveringEnded: boolean,
 	_terminalRequest: TerminalRequest?,
-	_reachedCallback: ReachedCallback,
 	_workCount: number,
-	_appliedClockSerial: number,
 }
 
 return {}

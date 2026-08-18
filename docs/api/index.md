@@ -1,7 +1,7 @@
 # API
 
-Pulse exposes one package root. Require only that root; every public value and type is re-exported
-by `src/init.luau`.
+Pulse exposes one package root. Require only that root; `src/init.luau` re-exports every public
+value and type.
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public package</span>
@@ -20,17 +20,18 @@ local Pulse = require(ReplicatedStorage.packages.pulse)
 | --- | --- | --- |
 | `sequence` | `<C>(SequenceDefinition<C>) -> Sequence<C>` | [`Pulse.sequence`](./components/sequence.md#pulse-sequence) |
 | `builder` | `<C>() -> Builder<C>` | [`Pulse.builder`](./components/builder.md#pulse-builder) |
-| `temporalAdapter` | `<P, D>(ProviderClock<P, D>, P, DirectionTokens<D>) -> TemporalAdapter` | [`Pulse.temporalAdapter`](./managers/temporalAdapter.md#pulse-temporal-adapter) |
-| `playback` | `<C>(Sequence<C>, TemporalAdapter, C, PlaybackOptions?) -> Playback` | [`Pulse.playback`](./components/playback.md#pulse-playback) |
+| `playback` | `<C>(Sequence<C>, C, PlaybackOptions?) -> Playback` | [`Pulse.playback`](./components/playback.md#pulse-playback) |
+| `clockDriver` | `<P, D>(ProviderClock<P, D>, P, DirectionTokens<D>) -> ClockDriver` | [`Pulse.clockDriver`](./managers/clockDriver.md#pulse-clock-driver) |
 
 ## Returned objects
 
 | Object | Responsibility |
 | --- | --- |
-| [`Sequence<ContextT>`](./components/sequence.md#sequence) | Immutable reusable compiled timeline tied to its callback context type |
-| [`Builder<ContextT>`](./components/builder.md#builder) | Mutable fluent sequence authoring helper |
-| [`TemporalAdapter`](./managers/temporalAdapter.md#temporal-adapter) | Borrowed clock/phase composition and shared execution |
-| [`Playback`](./components/playback.md#playback) | One live traversal and lifecycle |
+| [`Sequence<ContextT>`](./components/sequence.md#sequence) | Immutable reusable timeline tied to its callback context type |
+| [`Builder<ContextT>`](./components/builder.md#builder) | Mutable fluent authoring helper |
+| Raw [`Playback`](./components/playback.md#playback) | Externally sampled traversal and one lifecycle |
+| [`ClockDriver`](./managers/clockDriver.md#clock-driver) | Optional borrowed-clock scheduling and fan-out |
+| [`DrivenPlayback`](./managers/clockDriver.md#driven-playback) | Clock-driven facade for one attached raw Playback |
 
 ## Source-shaped reference
 
@@ -41,7 +42,7 @@ api/
 |   |-- playback
 |   '-- sequence
 |-- managers/
-|   '-- temporalAdapter
+|   '-- clockDriver
 '-- types/
     |-- definitions
     '-- type index

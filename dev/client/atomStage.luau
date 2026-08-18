@@ -2,7 +2,7 @@
 
 local Workspace = game:GetService("Workspace")
 
-export type ScenarioKey = "rebuild" | "skip" | "cancel" | "loop"
+export type ScenarioKey = "reconstruct" | "skip" | "cancel" | "loop"
 export type EventDirection = "forward" | "reverse" | "neutral"
 
 export type ViewModel = {
@@ -80,7 +80,7 @@ local COLORS = table.freeze({
 	neutron = Color3.fromRGB(95, 177, 255),
 	forward = Color3.fromRGB(86, 227, 167),
 	reverse = Color3.fromRGB(255, 173, 92),
-	rebuild = Color3.fromRGB(80, 204, 255),
+	reconstruct = Color3.fromRGB(80, 204, 255),
 	skip = Color3.fromRGB(86, 227, 167),
 	cancel = Color3.fromRGB(255, 105, 122),
 	loop = Color3.fromRGB(180, 120, 255),
@@ -151,7 +151,7 @@ local function createNucleons(root: Folder): { Nucleon }
 	local light = Instance.new("PointLight")
 	light.Name = "NucleusGlow"
 	light.Brightness = 2.2
-	light.Color = COLORS.rebuild
+	light.Color = COLORS.reconstruct
 	light.Range = 16
 	light.Shadows = false
 	light.Parent = nucleons[1].part
@@ -209,7 +209,7 @@ local function scenarioColor(key: ScenarioKey): Color3
 	elseif key == "loop" then
 		return COLORS.loop
 	end
-	return COLORS.rebuild
+	return COLORS.reconstruct
 end
 
 local function restoreCamera(snapshot: CameraSnapshot?)
@@ -348,7 +348,7 @@ function Stage.flash(self: ControllerImpl, direction: EventDirection)
 	self._flashColor = if direction == "reverse"
 		then COLORS.reverse
 		elseif direction == "forward" then COLORS.forward
-		else COLORS.rebuild
+		else COLORS.reconstruct
 end
 
 function Stage.destroy(self: ControllerImpl)

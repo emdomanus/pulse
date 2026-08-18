@@ -79,9 +79,11 @@ export type FakeClock<PhaseT> = {
 	stepRootTo: (self: FakeClock<PhaseT>, rootTime: number, phase: PhaseT) -> (),
 	evaluatePhase: (self: FakeClock<PhaseT>, phase: PhaseT) -> (),
 	setRate: (self: FakeClock<PhaseT>, rate: number) -> (),
+	setRevisionForTest: (self: FakeClock<PhaseT>, revision: number) -> (),
 	jumpTo: (self: FakeClock<PhaseT>, timePosition: number) -> (),
 	destroy: (self: FakeClock<PhaseT>) -> (),
 	setBeforeNextReached: (self: FakeClock<PhaseT>, callback: (() -> ())?) -> (),
+	setDuringNextSchedule: (self: FakeClock<PhaseT>, callback: (() -> ())?) -> (),
 	getTaskCount: (self: FakeClock<PhaseT>) -> number,
 	getChangedBindingCount: (self: FakeClock<PhaseT>) -> number,
 	getPhaseBindingCount: (self: FakeClock<PhaseT>) -> number,
@@ -90,6 +92,7 @@ export type FakeClock<PhaseT> = {
 	getScheduleCount: (self: FakeClock<PhaseT>) -> number,
 	getRescheduleCount: (self: FakeClock<PhaseT>) -> number,
 	getCancelCount: (self: FakeClock<PhaseT>) -> number,
+	getReadCount: (self: FakeClock<PhaseT>) -> number,
 	getLastTaskId: (self: FakeClock<PhaseT>) -> number?,
 	_rootTime: number,
 	_rootAtAnchor: number,
@@ -107,12 +110,14 @@ export type FakeClock<PhaseT> = {
 	_scheduleCount: number,
 	_rescheduleCount: number,
 	_cancelCount: number,
+	_readCount: number,
 	_lastTaskId: number?,
 	_beforeNextReached: (() -> ())?,
+	_duringNextSchedule: (() -> ())?,
 }
 
-local FORWARD: DirectionToken = table.freeze({ name = "forward" })
-local BACKWARD: DirectionToken = table.freeze({ name = "backward" })
+local FORWARD: DirectionToken = table.freeze({ name = "forward" :: "forward" })
+local BACKWARD: DirectionToken = table.freeze({ name = "backward" :: "backward" })
 
 local FakeClock = {}
 FakeClock.__index = FakeClock
@@ -176,14 +181,17 @@ function FakeClock.new<PhaseT>(options: FakeClockOptions?): FakeClock<PhaseT>
 			_scheduleCount = 0,
 			_rescheduleCount = 0,
 			_cancelCount = 0,
+			_readCount = 0,
 			_lastTaskId = nil,
 			_beforeNextReached = nil,
+			_duringNextSchedule = nil,
 		}, FakeClock) :: unknown
 	) :: FakeClock<PhaseT>
 end
 
 function FakeClock.read<PhaseT>(self: FakeClock<PhaseT>): ClockSample
 	assert(not self._destroyed, "cannot read a destroyed fake clock")
+	self._readCount += 1
 	return {
 		timePosition = position(self),
 		rate = self._rate,
@@ -242,6 +250,11 @@ function FakeClock.bindToReached<PhaseT>(
 	}
 	self._scheduleCount += 1
 	self._lastTaskId = id
+	local during = self._duringNextSchedule
+	self._duringNextSchedule = nil
+	if during ~= nil then
+		during()
+	end
 	return id
 end
 
@@ -393,6 +406,11 @@ function FakeClock.setRate<PhaseT>(self: FakeClock<PhaseT>, rate: number)
 	})
 end
 
+function FakeClock.setRevisionForTest<PhaseT>(self: FakeClock<PhaseT>, revision: number)
+	assert(isFinite(revision), "fake revision must be finite")
+	self._revision = revision
+end
+
 function FakeClock.jumpTo<PhaseT>(self: FakeClock<PhaseT>, timePosition: number)
 	assert(not self._destroyed and isFinite(timePosition), "fake jump position must be finite")
 	local previous = position(self)
@@ -438,6 +456,10 @@ end
 
 function FakeClock.setBeforeNextReached<PhaseT>(self: FakeClock<PhaseT>, callback: (() -> ())?)
 	self._beforeNextReached = callback
+end
+
+function FakeClock.setDuringNextSchedule<PhaseT>(self: FakeClock<PhaseT>, callback: (() -> ())?)
+	self._duringNextSchedule = callback
 end
 
 function FakeClock.getTaskCount<PhaseT>(self: FakeClock<PhaseT>): number
@@ -488,6 +510,10 @@ end
 
 function FakeClock.getCancelCount<PhaseT>(self: FakeClock<PhaseT>): number
 	return self._cancelCount
+end
+
+function FakeClock.getReadCount<PhaseT>(self: FakeClock<PhaseT>): number
+	return self._readCount
 end
 
 function FakeClock.getLastTaskId<PhaseT>(self: FakeClock<PhaseT>): number?

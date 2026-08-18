@@ -2,10 +2,8 @@
 --!optimize 2
 --!native
 
-local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.Parent.types.components.sequence)
 
-type AddressPolicy = DefTypes.AddressPolicy
 type AddressCallback<ContextT> = Types.AddressCallback<ContextT>
 type Builder<ContextT> = Types.Builder<ContextT>
 type BuilderImpl<ContextT> = Types.BuilderImpl<ContextT>
@@ -14,7 +12,7 @@ type EventCallback<ContextT> = Types.EventCallback<ContextT>
 type LoopCallback<ContextT> = Types.LoopCallback<ContextT>
 type Sequence<ContextT> = Types.Sequence<ContextT>
 type SequenceConstructor<ContextT> = Types.SequenceConstructor<ContextT>
-type Update<ContextT> = Types.Update<ContextT>
+type Sample<ContextT> = Types.Sample<ContextT>
 
 type BuilderModule = {
 	new: <ContextT>(constructSequence: SequenceConstructor<ContextT>) -> Builder<ContextT>,
@@ -29,9 +27,8 @@ local function ConstructBuilder<ContextT>(constructSequence: SequenceConstructor
 			_constructSequence = constructSequence,
 			_duration = nil,
 			_loop = false,
-			_addressPolicy = "skip" :: AddressPolicy,
 			_events = {},
-			_updates = {},
+			_samples = {},
 			_onPlay = nil,
 			_onAddress = nil,
 			_onLoop = nil,
@@ -50,11 +47,6 @@ function Builder.loop<ContextT>(self: BuilderImpl<ContextT>, enabled: boolean?):
 	return self
 end
 
-function Builder.addressPolicy<ContextT>(self: BuilderImpl<ContextT>, policy: AddressPolicy): Builder<ContextT>
-	self._addressPolicy = policy
-	return self
-end
-
 function Builder.event<ContextT>(self: BuilderImpl<ContextT>, event: Event<ContextT>): Builder<ContextT>
 	table.insert(self._events, {
 		time = event.time,
@@ -64,11 +56,11 @@ function Builder.event<ContextT>(self: BuilderImpl<ContextT>, event: Event<Conte
 	return self
 end
 
-function Builder.update<ContextT>(self: BuilderImpl<ContextT>, update: Update<ContextT>): Builder<ContextT>
-	table.insert(self._updates, {
-		startTime = update.startTime,
-		endTime = update.endTime,
-		run = update.run,
+function Builder.sample<ContextT>(self: BuilderImpl<ContextT>, sample: Sample<ContextT>): Builder<ContextT>
+	table.insert(self._samples, {
+		startTime = sample.startTime,
+		endTime = sample.endTime,
+		run = sample.run,
 	})
 	return self
 end
@@ -94,9 +86,8 @@ function Builder.compile<ContextT>(self: BuilderImpl<ContextT>): Sequence<Contex
 	return self._constructSequence({
 		duration = duration,
 		loop = self._loop,
-		addressPolicy = self._addressPolicy,
 		events = self._events,
-		updates = self._updates,
+		samples = self._samples,
 		onPlay = self._onPlay,
 		onAddress = self._onAddress,
 		onLoop = self._onLoop,

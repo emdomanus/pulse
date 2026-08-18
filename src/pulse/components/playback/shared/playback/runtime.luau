@@ -4,58 +4,60 @@
 
 local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.components.playback)
-local TemporalAdapterTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.managers.temporalAdapter)
 local SequenceRuntime = require(script.Parent.Parent.Parent.Parent.sequence.shared.sequence.runtime)
-local TemporalAdapter =
-	require(script.Parent.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 local Lifecycle = require(script.Parent.lifecycle)
 local Traversal = require(script.Parent.traversal)
 
 type AddressCause = DefTypes.AddressCause
-type ClockChange = TemporalAdapterTypes.ClockChange
-type ClockSample = TemporalAdapterTypes.ClockSample
+type AddressMode = DefTypes.AddressMode
 type Operation = PlaybackTypes.Operation
 type PlaybackControl = DefTypes.PlaybackControl
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
 type PlaybackPosition = DefTypes.PlaybackPosition
-type PlaybackSink = TemporalAdapterTypes.PlaybackSink
+type SampleInfo = DefTypes.SampleInfo
+type TraversalForecast = PlaybackTypes.TraversalForecast
 type SequenceAddress = DefTypes.SequenceAddress
 type TerminalRequest = PlaybackTypes.TerminalRequest
+type TimeSample = DefTypes.TimeSample
 type TraversalDirection = DefTypes.TraversalDirection
 
 type RuntimeModule = {
-	derivePosition: (self: PlaybackImpl, clockPosition: number) -> number?,
-	reanchor: (self: PlaybackImpl, sample: ClockSample) -> (),
+	copySample: (sample: TimeSample) -> TimeSample,
+	derivePosition: (self: PlaybackImpl, sourcePosition: number) -> number?,
 	desiredDirection: (self: PlaybackImpl) -> TraversalDirection?,
-	snapshotClock: (self: PlaybackImpl) -> (ClockSample?, number),
-	refreshOwnership: (self: PlaybackImpl, preserveTask: boolean) -> (),
+	runSamples: (self: PlaybackImpl) -> boolean,
+	finalizeAddress: (self: PlaybackImpl) -> (),
 	drainOperations: (self: PlaybackImpl) -> (),
 	enqueue: (self: PlaybackImpl, operation: Operation) -> (),
-	onReached: (self: PlaybackImpl) -> (),
+	getTraversalForecast: (self: PlaybackImpl) -> TraversalForecast,
+	projectSourcePosition: (self: PlaybackImpl, sourcePosition: number) -> PlaybackPosition?,
+	acceptSourceSample: (self: PlaybackImpl, sample: TimeSample) -> (),
+	getAcceptedSample: (self: PlaybackImpl) -> TimeSample?,
 }
 
 local MAX_RECONCILIATION_WORK = 4_096
-local DEADLINE_ABSOLUTE_EPSILON = 1e-9
-local DEADLINE_RELATIVE_EPSILON = 4.440892098500626e-16
 
--- Primitive and direction helpers
-
-local cancelScheduled = Lifecycle.cancelScheduled
-local stopUpdating = Lifecycle.stopUpdating
-local detach = Lifecycle.detach
 local finish = Lifecycle.finish
 local requestTerminal = Lifecycle.requestTerminal
-local reconcileTo = Traversal.reconcileTo
-local prepareDirection = Traversal.prepareDirection
-local selectNextBoundary = Traversal.selectNextBoundary
 local applyAddressTarget = Traversal.applyAddressTarget
-
-local refreshOwnership: (self: PlaybackImpl, preserveTask: boolean) -> ()
-local runPhaseUpdates: (self: PlaybackImpl, fromPosition: number, toPosition: number) -> ()
-local reconcileSample: (self: PlaybackImpl, sample: ClockSample, preserveTask: boolean, refreshAfter: boolean?) -> ()
+local finalizeAddressDirection = Traversal.finalizeAddressDirection
+local prepareDirection = Traversal.prepareDirection
+local prepareStationaryDirection = Traversal.prepareStationaryDirection
+local reconcileTo = Traversal.reconcileTo
+local selectNextBoundary = Traversal.selectNextBoundary
 
 local function isFinite(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function copySample(sample: TimeSample): TimeSample
+	assert(type(sample) == "table", "Pulse TimeSample must be a table")
+	assert(isFinite(sample.position), "Pulse TimeSample position must be finite")
+	assert(isFinite(sample.rate), "Pulse TimeSample rate must be finite")
+	return {
+		position = sample.position,
+		rate = sample.rate,
+	}
 end
 
 local function directionFor(rate: number, speed: number): TraversalDirection?
@@ -65,7 +67,7 @@ local function directionFor(rate: number, speed: number): TraversalDirection?
 	return if (rate > 0) == (speed > 0) then "forward" :: TraversalDirection else "backward" :: TraversalDirection
 end
 
-local function clockDirection(rate: number): TraversalDirection?
+local function sourceDirection(rate: number): TraversalDirection?
 	if rate > 0 then
 		return "forward" :: TraversalDirection
 	elseif rate < 0 then
@@ -78,49 +80,18 @@ local function asControl(self: PlaybackImpl): PlaybackControl
 	return (self :: unknown) :: PlaybackControl
 end
 
-local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
-	return self
+local function publicPosition(position: PlaybackPosition): PlaybackPosition
+	return {
+		timePosition = position.timePosition,
+		loopIndex = position.loopIndex,
+		unwrappedTimePosition = position.unwrappedTimePosition,
+	}
 end
 
-local function advanceTo(self: PlaybackImpl, target: PlaybackPosition, direction: TraversalDirection): boolean
-	local duration = self._sequence:getDuration()
-	local targetCoordinate = target.unwrappedTimePosition
-	local completes = not self._sequence:isLooping()
-		and (
-			(direction == "forward" and targetCoordinate >= duration)
-			or (direction == "backward" and targetCoordinate <= 0)
-		)
-	if not reconcileTo(self, target, direction) then
-		return false
-	end
-	local fromPosition = self._updateCursor
-	local toPosition = self._position.unwrappedTimePosition
-	self._updateCursor = toPosition
-	if fromPosition ~= toPosition then
-		runPhaseUpdates(self, fromPosition, toPosition)
-		if self._terminalRequest ~= nil or self._completion ~= nil then
-			return false
-		end
-	end
-	if completes then
-		requestTerminal(self, "completed", nil)
-		return false
-	end
-	return true
-end
-
--- Anchors and scheduling
-
-local function derivePosition(self: PlaybackImpl, clockPosition: number): number?
-	local delta = clockPosition - self._anchorClock
+local function derivePosition(self: PlaybackImpl, sourcePositionValue: number): number?
+	local delta = sourcePositionValue - self._anchorSource
 	local position = self._anchorSequence + delta * self._playbackSpeed
 	return if isFinite(delta) and isFinite(position) then position else nil
-end
-
-local function reanchor(self: PlaybackImpl, sample: ClockSample)
-	self._anchorClock = sample.timePosition
-	self._anchorSequence = self._position.unwrappedTimePosition
-	self._clockRate = sample.rate
 end
 
 local function positionAt(self: PlaybackImpl, unwrappedTimePosition: number): PlaybackPosition?
@@ -132,542 +103,217 @@ local function positionAt(self: PlaybackImpl, unwrappedTimePosition: number): Pl
 	return position
 end
 
+local function reanchor(self: PlaybackImpl, sample: TimeSample)
+	self._anchorSource = sample.position
+	self._anchorSequence = self._position.unwrappedTimePosition
+end
+
 local function desiredDirection(self: PlaybackImpl): TraversalDirection?
-	return directionFor(self._clockRate, self._playbackSpeed)
+	local sample = self._acceptedSample
+	return if sample == nil then nil else directionFor(sample.rate, self._playbackSpeed)
 end
 
-local function snapshotClock(self: PlaybackImpl): (ClockSample?, number)
-	local sample, clockSerial = TemporalAdapter._snapshot(self._adapter)
-	if sample == nil then
-		requestTerminal(self, "failed", "clockReadFailed")
-	end
-	return sample, clockSerial
-end
-
-local function updateLocalPosition(self: PlaybackImpl, direction: TraversalDirection): number
-	if self._sequence:isLooping() and self._position.timePosition == 0 and direction == "backward" then
-		return self._sequence:getDuration()
-	end
-	return self._position.timePosition
-end
-
-local function hasActiveUpdate(self: PlaybackImpl, direction: TraversalDirection): boolean
-	local localPosition = updateLocalPosition(self, direction)
-	for _, update in SequenceRuntime.getUpdates(self._sequence) do
-		if direction == "forward" then
-			if localPosition >= update.startTime and localPosition < update.endTime then
-				return true
-			end
-		elseif localPosition > update.startTime and localPosition <= update.endTime then
+local function requiresPhaseEvaluation(self: PlaybackImpl): boolean
+	local localPosition = self._position.timePosition
+	local direction = desiredDirection(self)
+	for _, sample in SequenceRuntime.getSamples(self._sequence) do
+		if localPosition >= sample.startTime and localPosition < sample.endTime then
+			return true
+		end
+		if direction == "backward" and localPosition == sample.endTime then
 			return true
 		end
 	end
-	return false
+	return (self._boundaryState == "forwardJoinPending" and direction == "forward")
+		or (self._boundaryState == "backwardJoinPending" and direction == "backward")
 end
 
-local function refreshUpdating(self: PlaybackImpl)
-	local direction: TraversalDirection? = desiredDirection(self)
-	local shouldUpdate = self._status == "playing"
-		and direction ~= nil
-		and hasActiveUpdate(self, direction :: TraversalDirection)
-	if shouldUpdate == self._updating then
-		return
+local function runSamples(self: PlaybackImpl): boolean
+	local accepted = self._acceptedSample
+	if accepted == nil then
+		return true
 	end
-	if shouldUpdate then
-		if not TemporalAdapter._setUpdating(self._adapter, asPlaybackSink(self), true) then
-			requestTerminal(self, "failed", "phaseBindFailed")
-			return
-		end
-		self._updating = true
-		self._updateCursor = self._position.unwrappedTimePosition
-	else
-		stopUpdating(self)
+	local effectiveRate = accepted.rate * self._playbackSpeed
+	if not isFinite(effectiveRate) then
+		requestTerminal(self, "failed", "numericOverflow")
+		return false
 	end
-end
-
-local function scheduleNext(self: PlaybackImpl, preserveTask: boolean)
-	local attempts = 0
-	while self._status == "playing" and self._terminalRequest == nil do
-		attempts += 1
-		if attempts > MAX_RECONCILIATION_WORK then
-			requestTerminal(self, "failed", "catchUpLimitExceeded")
-			return
-		end
-		local direction: TraversalDirection? = desiredDirection(self)
-		if direction == nil then
-			cancelScheduled(self)
-			return
-		end
-		local activeDirection: TraversalDirection = if direction == "forward"
-			then "forward" :: TraversalDirection
-			else "backward" :: TraversalDirection
-		local nextBoundary = selectNextBoundary(self, activeDirection)
-		if self._terminalRequest ~= nil then
-			return
-		end
-		if nextBoundary == nil then
-			requestTerminal(self, "completed", nil)
-			return
-		end
-		local nextCoordinate = nextBoundary.unwrappedTimePosition
-		local currentCoordinate = self._position.unwrappedTimePosition
-		if
-			(activeDirection == "forward" and nextCoordinate <= currentCoordinate)
-			or (activeDirection == "backward" and nextCoordinate >= currentCoordinate)
-		then
-			requestTerminal(self, "failed", "numericOverflow")
-			return
-		end
-		local runAt = self._anchorClock + (nextCoordinate - self._anchorSequence) / self._playbackSpeed
-		if not isFinite(runAt) then
-			requestTerminal(self, "failed", "numericOverflow")
-			return
-		end
-		local providerDirection: TraversalDirection? = clockDirection(self._clockRate)
-		if providerDirection == nil then
-			cancelScheduled(self)
-			return
-		end
-		if
-			(providerDirection == "forward" and runAt <= self._anchorClock)
-			or (providerDirection == "backward" and runAt >= self._anchorClock)
-		then
-			requestTerminal(self, "failed", "numericOverflow")
-			return
-		end
-
-		local sample, clockSerial = TemporalAdapter._snapshot(self._adapter)
-		if sample == nil then
-			requestTerminal(self, "failed", "clockReadFailed")
-			return
-		end
-		if clockSerial > self._appliedClockSerial then
-			cancelScheduled(self)
-			return
-		end
-		local alreadyReached = if providerDirection == "forward"
-			then sample.timePosition >= runAt
-			else sample.timePosition <= runAt
-		if alreadyReached then
-			cancelScheduled(self)
-			reconcileSample(self, sample, false, false)
+	local immutablePosition: PlaybackPosition = table.freeze(publicPosition(self._position))
+	local info: SampleInfo = table.freeze({
+		position = immutablePosition,
+		rate = effectiveRate,
+	})
+	local localPosition = self._position.timePosition
+	for _, sample in SequenceRuntime.getSamples(self._sequence) do
+		if localPosition >= sample.startTime and localPosition < sample.endTime then
+			self._workCount += 1
+			if self._workCount > MAX_RECONCILIATION_WORK then
+				requestTerminal(self, "failed", "catchUpLimitExceeded")
+				return false
+			end
+			if not pcall(sample.run, asControl(self), info, self._context) then
+				requestTerminal(self, "failed", "callbackFailed")
+				return false
+			end
 			if self._terminalRequest ~= nil or self._completion ~= nil then
-				return
+				return false
 			end
-			refreshUpdating(self)
-			continue
 		end
+	end
+	return true
+end
 
-		local id = self._scheduledId
-		if
-			id ~= nil
-			and preserveTask
-			and self._scheduledDirection == providerDirection
-			and TemporalAdapter._reschedule(self._adapter, id, runAt)
-		then
-			self._scheduledBoundary = nextBoundary
-		else
-			cancelScheduled(self)
-			local scheduled = TemporalAdapter._schedule(
-				self._adapter,
-				runAt,
-				providerDirection :: TraversalDirection,
-				self._reachedCallback
-			)
-			if scheduled == nil then
-				requestTerminal(self, "failed", "scheduleFailed")
-				return
-			end
-			self._scheduledId = scheduled
-			self._scheduledDirection = providerDirection :: TraversalDirection
-			self._scheduledBoundary = nextBoundary
-		end
-
-		local validationSample, validationSerial = TemporalAdapter._snapshot(self._adapter)
-		if validationSample == nil then
-			requestTerminal(self, "failed", "clockReadFailed")
-			return
-		end
-		if validationSerial > self._appliedClockSerial then
-			cancelScheduled(self)
-			return
-		end
-		local passedWhileScheduling = if providerDirection == "forward"
-			then validationSample.timePosition >= runAt
-			else validationSample.timePosition <= runAt
-		if not passedWhileScheduling then
-			return
-		end
-		cancelScheduled(self)
-		reconcileSample(self, validationSample, false, false)
-		if self._terminalRequest ~= nil or self._completion ~= nil then
-			return
-		end
-		refreshUpdating(self)
+local function completeIfOutward(self: PlaybackImpl)
+	if self._sequence:isLooping() or self._status ~= "playing" then
+		return
+	end
+	local duration = self._sequence:getDuration()
+	if duration == 0 then
+		requestTerminal(self, "completed", nil)
+		return
+	end
+	local direction = desiredDirection(self)
+	if
+		(direction == "forward" and self._position.unwrappedTimePosition >= duration)
+		or (direction == "backward" and self._position.unwrappedTimePosition <= 0)
+	then
+		requestTerminal(self, "completed", nil)
 	end
 end
 
-refreshOwnership = function(self: PlaybackImpl, preserveTask: boolean)
-	if self._completion ~= nil or self._terminalRequest ~= nil then
+local function finalizeAddress(self: PlaybackImpl)
+	if self._terminalRequest ~= nil or self._completion ~= nil then
 		return
 	end
-	local direction: TraversalDirection? = desiredDirection(self)
-	if direction ~= nil and not prepareDirection(self, direction) then
+	local direction = desiredDirection(self)
+	if direction ~= nil and not finalizeAddressDirection(self, direction :: TraversalDirection) then
 		return
 	end
-	refreshUpdating(self)
 	if self._terminalRequest == nil then
-		scheduleNext(self, preserveTask)
+		completeIfOutward(self)
 	end
 end
 
-reconcileSample = function(self: PlaybackImpl, sample: ClockSample, preserveTask: boolean, refreshAfter: boolean?)
-	local targetCoordinate = derivePosition(self, sample.timePosition)
+local function evaluateSample(self: PlaybackImpl, sample: TimeSample)
+	if self._status ~= "playing" then
+		return
+	end
+	if self._resumePending then
+		self._resumePending = false
+		self._acceptedSample = sample
+		reanchor(self, sample)
+		local resumedDirection = desiredDirection(self)
+		if resumedDirection ~= nil and not prepareStationaryDirection(self, resumedDirection :: TraversalDirection) then
+			return
+		end
+		if runSamples(self) then
+			completeIfOutward(self)
+		end
+		return
+	end
+
+	local targetCoordinate = derivePosition(self, sample.position)
 	if targetCoordinate == nil then
 		requestTerminal(self, "failed", "numericOverflow")
 		return
 	end
 	local currentCoordinate = self._position.unwrappedTimePosition
-	if targetCoordinate ~= currentCoordinate then
+	local moved = targetCoordinate ~= currentCoordinate
+	if moved then
 		local target = positionAt(self, targetCoordinate)
 		if target == nil then
 			return
 		end
-		local direction: TraversalDirection = if targetCoordinate > currentCoordinate then "forward" else "backward"
-		if not advanceTo(self, target, direction) then
+		local movement: TraversalDirection = if targetCoordinate > currentCoordinate
+			then "forward" :: TraversalDirection
+			else "backward" :: TraversalDirection
+		if not reconcileTo(self, target, movement) then
 			return
 		end
 	end
+
+	self._acceptedSample = sample
 	reanchor(self, sample)
-	if refreshAfter ~= false then
-		refreshOwnership(self, preserveTask)
-	end
-end
-
-local function reconcileReached(self: PlaybackImpl, sample: ClockSample)
-	local target = derivePosition(self, sample.timePosition)
-	if target == nil then
-		requestTerminal(self, "failed", "numericOverflow")
-		return
-	end
-	local scheduledBoundary = self._scheduledBoundary
-	local scheduledDirection = self._scheduledDirection
-	local currentClockDirection = clockDirection(sample.rate)
-	local tolerance = if scheduledBoundary == nil
-		then DEADLINE_ABSOLUTE_EPSILON
-		else math.max(
-			DEADLINE_ABSOLUTE_EPSILON,
-			math.abs(scheduledBoundary.unwrappedTimePosition) * DEADLINE_RELATIVE_EPSILON
-		)
-	if
-		scheduledBoundary ~= nil
-		and scheduledDirection ~= nil
-		and currentClockDirection == scheduledDirection
-		and math.abs(target - scheduledBoundary.unwrappedTimePosition) <= tolerance
-	then
-		local scheduledCoordinate = scheduledBoundary.unwrappedTimePosition
-		local currentCoordinate = self._position.unwrappedTimePosition
-		if scheduledCoordinate ~= currentCoordinate then
-			local movement: TraversalDirection = if scheduledCoordinate > currentCoordinate
-				then "forward"
-				else "backward"
-			if not advanceTo(self, scheduledBoundary, movement) then
-				return
-			end
-		end
-		reanchor(self, sample)
-		refreshOwnership(self, true)
-		return
-	end
-	reconcileSample(self, sample, true)
-end
-
-local function advanceClockPosition(self: PlaybackImpl, clockPosition: number): boolean
-	local targetCoordinate = derivePosition(self, clockPosition)
-	if targetCoordinate == nil then
-		requestTerminal(self, "failed", "numericOverflow")
-		return false
-	end
-	local currentCoordinate = self._position.unwrappedTimePosition
-	if targetCoordinate == currentCoordinate then
-		return true
-	end
-	local target = positionAt(self, targetCoordinate)
-	if target == nil then
-		return false
-	end
-	local movement: TraversalDirection = if targetCoordinate > currentCoordinate then "forward" else "backward"
-	return advanceTo(self, target, movement)
-end
-
-local function applyClockChange(self: PlaybackImpl, change: ClockChange, sample: ClockSample, clockSerial: number)
-	if clockSerial <= self._appliedClockSerial then
-		return
-	end
-	self._appliedClockSerial = clockSerial
-	if self._status ~= "playing" then
-		return
-	end
-	local previousClockPosition = change.previousTimePosition or change.currentTimePosition
-	if not advanceClockPosition(self, previousClockPosition) then
-		return
-	end
-	self._anchorClock = previousClockPosition
-	self._anchorSequence = self._position.unwrappedTimePosition
-	self._clockRate = sample.rate
-
-	local changeTarget = derivePosition(self, change.currentTimePosition)
-	if changeTarget == nil then
-		requestTerminal(self, "failed", "numericOverflow")
-		return
-	end
-	local changeTargetPosition = positionAt(self, changeTarget)
-	if changeTargetPosition == nil then
-		return
-	end
-	if change.discontinuous then
-		if
-			not applyAddressTarget(
-				self,
-				changeTargetPosition,
-				self._sequence:getAddressPolicy(),
-				"clockDiscontinuity",
-				"clockDiscontinuity" :: AddressCause,
-				desiredDirection(self)
-			)
-		then
-			return
-		end
-	else
-		local currentCoordinate = self._position.unwrappedTimePosition
-		if changeTarget ~= currentCoordinate then
-			local movement: TraversalDirection = if changeTarget > currentCoordinate then "forward" else "backward"
-			if not advanceTo(self, changeTargetPosition, movement) then
-				return
-			end
-		end
-	end
-
-	self._anchorClock = change.currentTimePosition
-	self._anchorSequence = self._position.unwrappedTimePosition
-	if sample.timePosition ~= change.currentTimePosition then
-		if not advanceClockPosition(self, sample.timePosition) then
+	local expectedDirection = desiredDirection(self)
+	if expectedDirection ~= nil then
+		local prepared = if moved
+			then prepareDirection(self, expectedDirection :: TraversalDirection)
+			else prepareStationaryDirection(self, expectedDirection :: TraversalDirection)
+		if not prepared then
 			return
 		end
 	end
-	reanchor(self, sample)
-	refreshOwnership(self, true)
-end
-
--- Continuous updates
-
-local function updateOverlap(
-	fromPosition: number,
-	toPosition: number,
-	startCoordinate: number,
-	endCoordinate: number
-): number
-	if toPosition >= fromPosition then
-		return math.max(0, math.min(toPosition, endCoordinate) - math.max(fromPosition, startCoordinate))
-	end
-	return -math.max(0, math.min(fromPosition, endCoordinate) - math.max(toPosition, startCoordinate))
-end
-
-runPhaseUpdates = function(self: PlaybackImpl, fromPosition: number, toPosition: number)
-	local direction: TraversalDirection = if toPosition >= fromPosition then "forward" else "backward"
-	local duration = self._sequence:getDuration()
-	local firstLoop = if self._sequence:isLooping()
-		then math.floor(math.min(fromPosition, toPosition) / duration)
-		else 0
-	local lastLoop = if self._sequence:isLooping() then math.floor(math.max(fromPosition, toPosition) / duration) else 0
-	if lastLoop - firstLoop > MAX_RECONCILIATION_WORK then
-		requestTerminal(self, "failed", "catchUpLimitExceeded")
-		return
-	end
-	local step = if direction == "forward" then 1 else -1
-	local loopIndex = if direction == "forward" then firstLoop else lastLoop
-	local finalLoop = if direction == "forward" then lastLoop else firstLoop
-	while true do
-		local base = loopIndex * duration
-		for _, update in SequenceRuntime.getUpdates(self._sequence) do
-			local overlap = updateOverlap(fromPosition, toPosition, base + update.startTime, base + update.endTime)
-			local localNow = updateLocalPosition(self, direction)
-			local activeNow = if direction == "forward"
-				then localNow >= update.startTime and localNow < update.endTime
-				else localNow > update.startTime and localNow <= update.endTime
-			if overlap ~= 0 or (fromPosition == toPosition and activeNow) then
-				self._workCount += 1
-				if self._workCount > MAX_RECONCILIATION_WORK then
-					requestTerminal(self, "failed", "catchUpLimitExceeded")
-					return
-				end
-				if not pcall(update.run, asControl(self), overlap, localNow, self._context) then
-					requestTerminal(self, "failed", "callbackFailed")
-					return
-				end
-				if self._terminalRequest ~= nil then
-					return
-				end
-			end
-		end
-		if loopIndex == finalLoop then
-			break
-		end
-		loopIndex += step
+	if runSamples(self) then
+		completeIfOutward(self)
 	end
 end
 
-local function applyPhase(self: PlaybackImpl, sample: ClockSample)
-	if self._status ~= "playing" or not self._updating then
-		return
-	end
-	local fromPosition = self._updateCursor
-	reconcileSample(self, sample, true)
-	if self._terminalRequest ~= nil or self._completion ~= nil then
-		return
-	end
-	local currentPosition = self._position.unwrappedTimePosition
-	if self._updating and fromPosition == currentPosition then
-		runPhaseUpdates(self, currentPosition, currentPosition)
+local function applyPause(self: PlaybackImpl)
+	if self._status == "playing" then
+		self._status = "paused"
+		self._resumePending = false
 	end
 end
 
--- Mutation serialization and reentrancy
-
-local function applyPause(self: PlaybackImpl, sample: ClockSample)
-	if self._status ~= "playing" then
-		return
+local function applyResume(self: PlaybackImpl)
+	if self._status == "paused" then
+		self._status = "playing"
+		self._resumePending = true
 	end
-	reconcileSample(self, sample, true, false)
-	if self._terminalRequest ~= nil then
-		return
-	end
-	cancelScheduled(self)
-	detach(self)
-	self._status = "paused"
 end
 
-local function applyResume(self: PlaybackImpl, sample: ClockSample, clockSerial: number)
-	if self._status ~= "paused" then
-		return
-	end
-	self._appliedClockSerial = math.max(self._appliedClockSerial, clockSerial)
-	reanchor(self, sample)
-	self._status = "playing"
-	if not TemporalAdapter._attach(self._adapter, asPlaybackSink(self)) then
-		requestTerminal(self, "failed", "adapterAttachFailed")
-		return
-	end
-	self._attached = true
-	refreshOwnership(self, false)
-end
-
-local function applySpeed(self: PlaybackImpl, speed: number, sample: ClockSample, clockSerial: number)
+local function applySpeed(self: PlaybackImpl, speed: number)
 	if self._status ~= "playing" and self._status ~= "paused" then
 		return
 	end
-	if self._status == "playing" then
-		reconcileSample(self, sample, true, false)
-		if self._terminalRequest ~= nil then
-			return
-		end
-	else
-		self._appliedClockSerial = math.max(self._appliedClockSerial, clockSerial)
-		self._clockRate = sample.rate
-	end
 	self._playbackSpeed = speed
-	reanchor(self, sample)
-	if self._status == "playing" then
-		refreshOwnership(self, true)
+	local accepted = self._acceptedSample
+	if accepted ~= nil then
+		reanchor(self, accepted)
+	end
+	if self._status == "playing" and not self._resumePending then
+		local direction = desiredDirection(self)
+		if direction ~= nil then
+			prepareStationaryDirection(self, direction :: TraversalDirection)
+		end
+		if self._terminalRequest == nil then
+			completeIfOutward(self)
+		end
 	end
 end
 
-local function applySeek(self: PlaybackImpl, address: SequenceAddress, sample: ClockSample, clockSerial: number)
-	if self._status == "idle" or self._completion ~= nil then
+local function applySeek(self: PlaybackImpl, address: SequenceAddress, mode: AddressMode)
+	if self._status ~= "playing" and self._status ~= "paused" then
 		return
 	end
-	local validated = SequenceRuntime.validateAddress(self._sequence, address)
-	if self._status == "playing" then
-		reconcileSample(self, sample, true, false)
-		if self._terminalRequest ~= nil then
-			return
-		end
-	else
-		self._appliedClockSerial = math.max(self._appliedClockSerial, clockSerial)
-		self._clockRate = sample.rate
-	end
-	if
-		not applyAddressTarget(
-			self,
-			validated,
-			self._sequence:getAddressPolicy(),
-			"seekCancelled",
-			"seek" :: AddressCause,
-			desiredDirection(self)
-		)
-	then
+	local target = SequenceRuntime.validateAddress(self._sequence, address)
+	if not applyAddressTarget(self, target, mode, "seek" :: AddressCause, desiredDirection(self)) then
 		return
 	end
-	reanchor(self, sample)
+	local accepted = self._acceptedSample
+	if accepted ~= nil then
+		reanchor(self, accepted)
+	end
+	if not runSamples(self) then
+		return
+	end
 	if self._status == "playing" then
-		refreshOwnership(self, true)
+		finalizeAddress(self)
 	end
 end
 
 local function applyOperation(self: PlaybackImpl, operation: Operation)
-	if operation.kind == "clockChange" then
-		applyClockChange(self, operation.change, operation.sample, operation.clockSerial)
-	elseif operation.kind == "phase" then
-		applyPhase(self, operation.sample)
-	elseif operation.kind == "reached" then
-		if self._status ~= "playing" then
-			return
-		end
-		reconcileReached(self, operation.sample)
+	if operation.kind == "evaluate" then
+		evaluateSample(self, operation.sample)
 	elseif operation.kind == "pause" then
-		applyPause(self, operation.sample)
+		applyPause(self)
 	elseif operation.kind == "resume" then
-		applyResume(self, operation.sample, operation.clockSerial)
+		applyResume(self)
 	elseif operation.kind == "speed" then
-		applySpeed(self, operation.speed, operation.sample, operation.clockSerial)
+		applySpeed(self, operation.speed)
 	elseif operation.kind == "seek" then
-		applySeek(self, operation.address, operation.sample, operation.clockSerial)
+		applySeek(self, operation.address, operation.mode)
 	end
-end
-
-local function sampledOperationSerial(operation: Operation): number?
-	if operation.kind == "clockChange" then
-		return nil
-	elseif operation.kind == "phase" or operation.kind == "reached" then
-		return operation.clockSerial
-	elseif operation.kind == "pause" or operation.kind == "resume" then
-		return operation.clockSerial
-	elseif operation.kind == "speed" or operation.kind == "seek" then
-		return operation.clockSerial
-	end
-	return nil
-end
-
-local function nextOperationIndex(self: PlaybackImpl): number?
-	local operation = self._operations[1]
-	if operation == nil then
-		return nil
-	end
-	local requiredSerial = sampledOperationSerial(operation)
-	if self._status == "paused" or requiredSerial == nil or requiredSerial <= self._appliedClockSerial then
-		return 1
-	end
-	for index = 2, #self._operations do
-		local candidate = self._operations[index]
-		if
-			candidate.kind == "clockChange"
-			and candidate.clockSerial > self._appliedClockSerial
-			and candidate.clockSerial <= requiredSerial
-		then
-			return index
-		end
-	end
-	return nil
 end
 
 local function drainOperations(self: PlaybackImpl)
@@ -676,17 +322,8 @@ local function drainOperations(self: PlaybackImpl)
 	end
 	self._busy = true
 	while #self._operations > 0 and self._completion == nil and self._terminalRequest == nil do
-		local operationIndex = nextOperationIndex(self)
-		if operationIndex == nil then
-			break
-		end
-		local operation = table.remove(self._operations, operationIndex)
+		local operation = table.remove(self._operations, 1)
 		assert(operation ~= nil, "Pulse operation queue invariant failed")
-		self._workCount += 1
-		if self._workCount > MAX_RECONCILIATION_WORK then
-			requestTerminal(self, "failed", "catchUpLimitExceeded")
-			break
-		end
 		if not pcall(applyOperation, self, operation) then
 			requestTerminal(self, "failed", "operationFailed")
 		end
@@ -710,26 +347,96 @@ local function enqueue(self: PlaybackImpl, operation: Operation)
 	drainOperations(self)
 end
 
-local function onReached(self: PlaybackImpl)
-	local sample, clockSerial = snapshotClock(self)
-	if sample ~= nil then
-		enqueue(self, {
-			kind = "reached",
-			sample = sample,
-			clockSerial = clockSerial,
-		})
+local function getTraversalForecast(self: PlaybackImpl): TraversalForecast
+	if self._status ~= "playing" or self._acceptedSample == nil then
+		return {
+			phaseRequired = false,
+			sourceBoundary = nil,
+			sourceDirection = nil,
+		}
 	end
+	if self._resumePending then
+		return {
+			phaseRequired = true,
+			sourceBoundary = nil,
+			sourceDirection = nil,
+		}
+	end
+	local phaseRequired = requiresPhaseEvaluation(self)
+	local direction = desiredDirection(self)
+	local accepted = self._acceptedSample :: TimeSample
+	local acceptedSourceDirection = sourceDirection(accepted.rate)
+	if direction == nil or acceptedSourceDirection == nil then
+		return {
+			phaseRequired = phaseRequired,
+			sourceBoundary = nil,
+			sourceDirection = nil,
+		}
+	end
+	local boundary = selectNextBoundary(self, direction :: TraversalDirection)
+	if boundary == nil or self._terminalRequest ~= nil then
+		return {
+			phaseRequired = phaseRequired,
+			sourceBoundary = nil,
+			sourceDirection = nil,
+		}
+	end
+	local sourceBoundaryValue = self._anchorSource
+		+ (boundary.unwrappedTimePosition - self._anchorSequence) / self._playbackSpeed
+	if not isFinite(sourceBoundaryValue) then
+		requestTerminal(self, "failed", "numericOverflow")
+		return {
+			phaseRequired = false,
+			sourceBoundary = nil,
+			sourceDirection = nil,
+		}
+	end
+	return {
+		phaseRequired = phaseRequired,
+		sourceBoundary = sourceBoundaryValue,
+		sourceDirection = acceptedSourceDirection :: TraversalDirection,
+	}
+end
+
+local function projectSourcePosition(self: PlaybackImpl, sourcePositionValue: number): PlaybackPosition?
+	assert(isFinite(sourcePositionValue), "Pulse source position must be finite")
+	local target = derivePosition(self, sourcePositionValue)
+	if target == nil then
+		requestTerminal(self, "failed", "numericOverflow")
+		return nil
+	end
+	return positionAt(self, target)
+end
+
+local function acceptSourceSample(self: PlaybackImpl, sample: TimeSample)
+	local accepted = copySample(sample)
+	self._acceptedSample = accepted
+	self._resumePending = false
+	reanchor(self, accepted)
+end
+
+local function getAcceptedSample(self: PlaybackImpl): TimeSample?
+	local accepted = self._acceptedSample
+	return if accepted == nil
+		then nil
+		else {
+			position = accepted.position,
+			rate = accepted.rate,
+		}
 end
 
 local module: RuntimeModule = {
+	copySample = copySample,
 	derivePosition = derivePosition,
-	reanchor = reanchor,
 	desiredDirection = desiredDirection,
-	snapshotClock = snapshotClock,
-	refreshOwnership = refreshOwnership,
+	runSamples = runSamples,
+	finalizeAddress = finalizeAddress,
 	drainOperations = drainOperations,
 	enqueue = enqueue,
-	onReached = onReached,
+	getTraversalForecast = getTraversalForecast,
+	projectSourcePosition = projectSourcePosition,
+	acceptSourceSample = acceptSourceSample,
+	getAcceptedSample = getAcceptedSample,
 }
 
 return module

@@ -3,7 +3,7 @@ import { defineConfig } from "vitepress";
 export default defineConfig({
 	base: process.env.DOCS_BASE ?? "/",
 	title: "Pulse",
-	description: "Clock-driven sequence playback for Roblox.",
+	description: "Externally evaluable absolute-time sequences for Roblox.",
 	cleanUrls: true,
 	themeConfig: {
 		nav: [
@@ -48,7 +48,7 @@ export default defineConfig({
 						text: "managers/",
 						collapsed: true,
 						items: [
-							{ text: "temporalAdapter", link: "/api/managers/temporalAdapter" },
+							{ text: "clockDriver", link: "/api/managers/clockDriver" },
 						],
 					},
 					{

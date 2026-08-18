@@ -3,16 +3,15 @@
 <div class="api-path">src/pulse/components/playback/shared/playback/init.luau</div>
 
 <div class="api-meta">
-  <span class="api-badge api-badge--public">Public live object</span>
+  <span class="api-badge api-badge--public">Public raw core</span>
+  <span class="api-badge">Externally sampled</span>
   <span class="api-badge">Single lifecycle</span>
-  <span class="api-badge">Clock anchored</span>
 </div>
 
 A Playback is one live traversal of a reusable
-[`Sequence<ContextT>`](./sequence.md#sequence) through a
-[`TemporalAdapter`](../managers/temporalAdapter.md#temporal-adapter). Construction is inert; call
-[`play`](#playback-play) after registering observers. The constructor also receives the exact
-per-play context delivered to every authored callback.
+[`Sequence<ContextT>`](./sequence.md#sequence). It owns no clock and advances only through finite
+[`TimeSample`](../types/definitions.md#time-sample) values supplied to `play` and `evaluate`.
+Construction is inert so observers can be registered before synchronous work begins.
 
 <a id="playback-options"></a>
 ## PlaybackOptions
@@ -27,19 +26,19 @@ type PlaybackOptions = {
 
 | Field | Default | Description |
 | --- | --- | --- |
-| `playbackSpeed` | `1` | Finite sequence-local clock-displacement multiplier |
-| `position` | `{ timePosition = 0 }` | Initial address established when play begins |
-| `initialMode` | `"reconstruct"` | Replays history or skips directly to the initial address |
+| `playbackSpeed` | `1` | Finite local multiplier applied to source displacement and sampled rate |
+| `position` | `{ timePosition = 0 }` | Exact initial address established by `play` |
+| `initialMode` | `"reconstruct"` | Reconstructs history or skips directly to the initial address |
 
-Negative speed reverses traversal, and zero speed makes the Playback dormant without pausing its
-lifecycle. For looping Sequences, `position.loopIndex` selects the exact logical cycle. Use
-`initialMode = "skip"` for a late materialization that must not emit historical events.
+Negative speed reverses mapping and zero speed prevents source displacement from moving the
+sequence. For a looping Sequence, `position.loopIndex` selects the exact logical cycle. Choose
+`initialMode = "skip"` for late materialization that must not replay historical one-shot Events.
 
 <a id="playback-control"></a>
 ## PlaybackControl
 
-The capability passed to authored event, update, setup, and loop callbacks. It contains the
-Playback control and read methods, but not `play`, observers, or completion access.
+The capability passed to authored Event, Sample, setup, address, and loop callbacks. It contains
+control and read methods, but not `play`, `evaluate`, observers, or completion access.
 
 ```luau
 type PlaybackControl = {
@@ -47,7 +46,7 @@ type PlaybackControl = {
 	resume: (self: PlaybackControl) -> (),
 	setPlaybackSpeed: (self: PlaybackControl, speed: number) -> (),
 	getPlaybackSpeed: (self: PlaybackControl) -> number,
-	seek: (self: PlaybackControl, address: SequenceAddress) -> boolean,
+	seek: (self: PlaybackControl, address: SequenceAddress, mode: AddressMode) -> boolean,
 	getPosition: (self: PlaybackControl) -> PlaybackPosition,
 	getStatus: (self: PlaybackControl) -> Status,
 	addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),
@@ -55,6 +54,11 @@ type PlaybackControl = {
 	destroy: (self: PlaybackControl) -> (),
 }
 ```
+
+For a raw host, this capability follows the Playback's lifetime. When the Playback is attached to
+a `ClockDriver`, callback code may use it synchronously and its mutations serialize through the raw
+operation queue. It must not retain the capability and invoke it asynchronously while driven;
+later temporal control must use the attachment's `DrivenPlayback` facade.
 
 <a id="ended-callback"></a>
 ## EndedCallback
@@ -79,9 +83,10 @@ An observer for logical forward or backward loop crossings.
 
 ```luau
 type Playback = PlaybackControl & {
-	play: (self: Playback) -> Playback,
-	onEnded: (self: Playback, callback: (Completion) -> ()) -> Release,
-	onLooped: (self: Playback, callback: (LoopChange) -> ()) -> Release,
+	play: (self: Playback, sample: TimeSample) -> Playback,
+	evaluate: (self: Playback, sample: TimeSample) -> boolean,
+	onEnded: (self: Playback, callback: EndedCallback) -> Release,
+	onLooped: (self: Playback, callback: LoopedCallback) -> Release,
 	isAlive: (self: Playback) -> boolean,
 	getCompletion: (self: Playback) -> Completion?,
 }
@@ -89,13 +94,14 @@ type Playback = PlaybackControl & {
 
 ## Summary
 
-### Lifecycle
+### Lifecycle and time
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| [`play`](#playback-play) | `() -> Playback` | Starts the one lifecycle |
-| [`pause`](#playback-pause) | `() -> ()` | Reconciles and detaches without catching up paused clock time |
-| [`resume`](#playback-resume) | `() -> ()` | Re-anchors and resumes scheduling |
+| [`play`](#playback-play) | `(TimeSample) -> Playback` | Establishes the first address and starts the lifecycle |
+| [`evaluate`](#playback-evaluate) | `(TimeSample) -> boolean` | Traverses to an absolute source sample and samples final state |
+| [`pause`](#playback-pause) | `() -> ()` | Pauses at the accepted coordinate |
+| [`resume`](#playback-resume) | `() -> ()` | Makes the next sample a no-catch-up re-anchor |
 | [`cancel`](#playback-cancel) | `(reason: string?) -> ()` | Completes as `cancelled` |
 | [`destroy`](#playback-destroy) | `() -> ()` | Completes as `destroyed` and retires observers |
 | [`isAlive`](#playback-is-alive) | `() -> boolean` | Tests whether no terminal Completion exists |
@@ -104,19 +110,19 @@ type Playback = PlaybackControl & {
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| [`setPlaybackSpeed`](#playback-set-playback-speed) | `(speed: number) -> ()` | Reconciles, re-anchors, and reschedules without snapping |
-| [`getPlaybackSpeed`](#playback-get-playback-speed) | `() -> number` | Reads the sequence-local multiplier |
-| [`seek`](#playback-seek) | `(SequenceAddress) -> boolean` | Applies the Sequence address policy |
-| [`getPosition`](#playback-get-position) | `() -> PlaybackPosition` | Reads a cloned current position |
+| [`setPlaybackSpeed`](#playback-set-playback-speed) | `(number) -> ()` | Re-anchors local mapping at the accepted coordinate |
+| [`getPlaybackSpeed`](#playback-get-playback-speed) | `() -> number` | Reads the local multiplier |
+| [`seek`](#playback-seek) | `(SequenceAddress, AddressMode) -> boolean` | Explicitly skips or reconstructs |
+| [`getPosition`](#playback-get-position) | `() -> PlaybackPosition` | Reads a cloned accepted position |
 | [`getStatus`](#playback-get-status) | `() -> Status` | Reads active or terminal state |
 
 ### Ownership and observation
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| [`addCleanup`](#playback-add-cleanup) | `(cleanup: () -> ()) -> ()` | Adds generation-scoped LIFO cleanup |
-| [`onEnded`](#playback-on-ended) | `((Completion) -> ()) -> Release` | Observes the single terminal result |
-| [`onLooped`](#playback-on-looped) | `((LoopChange) -> ()) -> Release` | Observes logical loop crossings |
+| [`addCleanup`](#playback-add-cleanup) | `(() -> ()) -> ()` | Adds generation-scoped LIFO cleanup |
+| [`onEnded`](#playback-on-ended) | `(EndedCallback) -> Release` | Observes the terminal result |
+| [`onLooped`](#playback-on-looped) | `(LoopedCallback) -> Release` | Observes logical loop crossings |
 | [`getCompletion`](#playback-get-completion) | `() -> Completion?` | Reads the immutable terminal result |
 
 <a id="pulse-playback"></a>
@@ -125,39 +131,58 @@ type Playback = PlaybackControl & {
 ```luau
 Pulse.playback<ContextT>(
 	sequence: Sequence<ContextT>,
-	adapter: TemporalAdapter,
 	context: ContextT,
 	options: PlaybackOptions?
 ) -> Playback
 ```
 
-Creates an idle Playback and retains `context` for its authored callbacks. The generic Sequence
-type requires the matching context shape at analysis time. Pulse does not clone or interpret the
-context; the host owns any objects and capabilities it contains. Pulse releases its retained
-reference after terminal cleanup and before Ended observers run.
+Creates an idle raw Playback and retains `context` for authored callbacks. The Sequence's invariant
+generic requires the matching context type at analysis time. Pulse does not clone or interpret the
+context and releases its retained reference during terminal cleanup before Ended observers run.
 
-Construction does not read, attach to, or schedule against the clock until `Playback:play`. An
-invalid initial speed, address, or mode raises during construction.
+No provider or driver is required. Invalid initial speed, address, or mode raises during
+construction.
 
 <a id="playback-play"></a>
 ### Playback:play
 
 ```luau
-Playback:play() -> Playback
+Playback:play(sample: TimeSample) -> Playback
 ```
 
-Starts an idle Playback, attaches to the adapter, and opens the first setup/cleanup generation. In
-`reconstruct` mode it replays authored events from the current loop's zero boundary to the initial
-position. In `skip` mode it establishes the position without running historical events, including
-events exactly at the target. It then invokes `onAddress`, schedules the next future boundary, and
-joins continuous execution only if update work requires it.
+Copies and validates the first source sample, enters `playing`, and establishes the configured
+initial address. `reconstruct` opens the first generation and replays Events canonically forward
+from local zero of the selected loop; `skip` opens the generation and suppresses historical Events,
+including Events exactly at the target.
 
-For a non-looping zero-duration Sequence, the Playback completes, drains cleanup, and emits Ended
-synchronously without scheduling. `reconstruct` runs time-zero events; `skip` suppresses them. Both
-modes run `onPlay` followed by `onAddress` when authored.
+Ordering is: setup/reconstruction or placement, `onAddress`, each active Sample once, then future
+traversal provenance. For a non-looping zero-duration Sequence, outward motion completes
+synchronously after this work. Calling `play` after leaving `idle` is an idempotent no-op; construct
+another Playback to run the Sequence again.
 
-Calling `play` after the Playback has left `idle` is an idempotent no-op. A terminal Playback cannot
-be replayed; construct another Playback from the same Sequence.
+<a id="playback-evaluate"></a>
+### Playback:evaluate
+
+```luau
+Playback:evaluate(sample: TimeSample) -> boolean
+```
+
+Maps the absolute source displacement through:
+
+```text
+target = anchorSequence + (sample.position - anchorSource) * playbackSpeed
+```
+
+Pulse never multiplies the displacement by `sample.rate`. It traverses every crossed discrete
+boundary exactly once, preserving equal-time ordering, reverse callbacks, loop hooks, loop
+observers, and exact loop-boundary provenance. It then accepts/re-anchors the sample and invokes
+each Sample active at the final `[startTime, endTime)` position once with effective rate
+`sample.rate * playbackSpeed`.
+
+A multi-loop jump does not synthesize one Sample callback per crossed loop. Equal-position
+evaluation emits no discrete Event again but may Sample active state once. Returns `true` when a
+playing Playback accepted the evaluation for serialized processing; returns `false` otherwise.
+Invalid samples raise before the status check.
 
 <a id="playback-pause"></a>
 ### Playback:pause
@@ -166,8 +191,8 @@ be replayed; construct another Playback from the same Sequence.
 Playback:pause() -> ()
 ```
 
-Reconciles to the current sample, cancels the reached task, leaves continuous execution, detaches
-from clock changes, and enters `paused`. Provider clock movement while paused is not caught up.
+Enters `paused` at the currently accepted evaluated coordinate. The raw core has no implicit clock
+to reconcile. If the mutation belongs at a newer coordinate, call `evaluate(newerSample)` first.
 Calls outside `playing` do nothing.
 
 <a id="playback-resume"></a>
@@ -177,8 +202,9 @@ Calls outside `playing` do nothing.
 Playback:resume() -> ()
 ```
 
-Re-anchors the paused sequence position to the current clock sample, reattaches, and restores only
-the scheduling work currently needed. Calls outside `paused` do nothing.
+Returns a paused Playback to `playing`, but leaves it pending until the next `evaluate`. That first
+sample is accepted as a new source anchor at the stored sequence position, invokes active Samples,
+and does not traverse source motion that occurred while paused. Calls outside `paused` do nothing.
 
 <a id="playback-set-playback-speed"></a>
 ### Playback:setPlaybackSpeed
@@ -187,10 +213,10 @@ the scheduling work currently needed. Calls outside `paused` do nothing.
 Playback:setPlaybackSpeed(speed: number) -> ()
 ```
 
-Sets a finite sequence-local multiplier. A playing Playback first reconciles under the old speed,
-then re-anchors and reschedules under the new speed. A paused Playback changes speed without moving.
-Calls on idle or terminal Playbacks do not change the configured value; use `PlaybackOptions` for
-the initial speed.
+Sets a finite local multiplier for a playing or paused Playback. The mapping re-anchors at the
+currently accepted source/sequence coordinate, so the position does not snap. A raw host requiring
+the speed change at newer source time must evaluate that sample first. Calls on idle or terminal
+Playbacks do not alter the configured value; use `PlaybackOptions` for initial speed.
 
 <a id="playback-get-playback-speed"></a>
 ### Playback:getPlaybackSpeed
@@ -205,23 +231,22 @@ Returns the current local multiplier.
 ### Playback:seek
 
 ```luau
-Playback:seek(address: SequenceAddress) -> boolean
+Playback:seek(address: SequenceAddress, mode: AddressMode) -> boolean
 ```
 
-Validates the address, reconciles live timeline work, and applies the Sequence's address policy:
+Validates and applies one explicit address operation at the currently accepted coordinate:
 
-| Policy | Behavior |
+| Mode | Behavior |
 | --- | --- |
-| `skip` | Moves the cursor without replaying events or replacing the cleanup generation |
-| `rebuild` | Disposes the current generation, calls `onPlay`, and replays forward from local zero to the target |
-| `cancel` | Completes the Playback as `cancelled` with reason `seekCancelled` |
+| `skip` | Places the cursor without historical Events or cleanup-generation replacement |
+| `reconstruct` | Flushes the old generation LIFO, opens a new one, and replays canonical forward history to the target |
 
-After a successful `skip` or `rebuild`, Pulse invokes `onAddress` with cause `seek`. For `rebuild`,
-the callback runs after replay in the fresh generation. For `skip`, it runs without cleanup and may
-reconcile host-owned leases in place.
+Both modes then call `onAddress` with cause `seek`, invoke active Samples once at the target, and
+refresh future traversal provenance. Cancellation is not an address mode; call `cancel` explicitly.
 
-Returns `true` when an active Playback accepted the request for serialized processing. Returns
-`false` for idle, terminal, or currently terminating Playbacks. Invalid addresses raise.
+Returns `true` when a playing or paused Playback accepted the request. Returns `false` for idle,
+terminal, or terminating Playbacks. Invalid addresses or modes raise. Reentrant calls are queued
+behind the current authored callback.
 
 <a id="playback-get-position"></a>
 ### Playback:getPosition
@@ -230,10 +255,10 @@ Returns `true` when an active Playback accepted the request for serialized proce
 Playback:getPosition() -> PlaybackPosition
 ```
 
-Returns a new position record. While playing, the read projects the latest safe clock sample from
-the current anchor; it does not itself deliver events. At exact loop joins, `{ timePosition =
-duration, loopIndex = n }` and `{ timePosition = 0, loopIndex = n + 1 }` remain distinct authored
-boundary identities even though their unwrapped coordinate is equal.
+Returns a new record for the accepted cursor. It never reads, interpolates, or projects implicit
+clock/wall time. Exact loop-join identities remain distinct even when their unwrapped coordinate is
+equal. An explicit duration-side address remains on that side; a later forward evaluation performs
+the still-future loop hook and next-cycle zero work.
 
 <a id="playback-get-status"></a>
 ### Playback:getStatus
@@ -251,9 +276,9 @@ Returns `idle`, `playing`, `paused`, or the final terminal status.
 Playback:addCleanup(cleanup: () -> ()) -> ()
 ```
 
-Registers cleanup on the current generation. Cleanup runs in reverse registration order during a
-`rebuild` or terminal completion. A callback registered after completion runs immediately. Cleanup
-is not an occurrence-specific reverse callback; use `Event.reverse` for traversal undo.
+Registers cleanup on the current generation. Cleanup runs in reverse registration order during
+reconstruction or terminal completion. A callback registered after completion runs immediately.
+Cleanup is not an Event-specific reverse action; use `Event.reverse` for traversal undo.
 
 If generation cleanup throws, Pulse continues draining the remaining callbacks and fails with
 reason `cleanupFailed`.
@@ -265,9 +290,8 @@ reason `cleanupFailed`.
 Playback:cancel(reason: string?) -> ()
 ```
 
-Requests terminal status `cancelled`, releases scheduling ownership, drains cleanup, and emits
-Ended once. A terminal request made inside an authored callback interrupts remaining equal-time
-work after that callback returns.
+Requests terminal status `cancelled`, drains cleanup, and publishes Ended once. A terminal request
+made inside an authored callback interrupts remaining equal-time work after that callback returns.
 
 <a id="playback-destroy"></a>
 ### Playback:destroy
@@ -276,30 +300,31 @@ work after that callback returns.
 Playback:destroy() -> ()
 ```
 
-Requests terminal status `destroyed`. Calling it after completion clears retained Ended and Looped
-observer bindings. It does not destroy the Sequence, adapter, or provider clock.
+Requests terminal status `destroyed`. Calling it after completion clears retained observer
+bindings. It does not destroy the immutable Sequence or any external resource not registered as
+cleanup.
 
 <a id="playback-on-ended"></a>
 ### Playback:onEnded
 
 ```luau
-Playback:onEnded(callback: (completion: Completion) -> ()) -> Release
+Playback:onEnded(callback: EndedCallback) -> Release
 ```
 
-Observes the single immutable Completion. A callback registered after completion is invoked
-synchronously and receives a no-op Release. Observer errors are isolated and do not change the
-Playback result. Reentrant registration during Ended delivery is not invoked recursively.
+Observes the single immutable Completion. Registration after completion invokes the callback
+synchronously and returns a no-op Release. Observer errors are isolated and do not change the
+result; registration during Ended delivery is not invoked recursively.
 
 <a id="playback-on-looped"></a>
 ### Playback:onLooped
 
 ```luau
-Playback:onLooped(callback: (change: LoopChange) -> ()) -> Release
+Playback:onLooped(callback: LoopedCallback) -> Release
 ```
 
-Observes each logical cycle crossing while alive. The authored `SequenceDefinition.onLoop` runs
-first. Forward ordering is duration events, authored loop callback, Looped observers, then the next
-cycle's zero events. Reverse traversal mirrors that order from zero into the previous duration.
+Observes logical cycle crossings while alive. The authored `onLoop` hook runs first. Forward
+ordering is duration Events, authored loop hook, Looped observers, then next-cycle zero Events;
+backward traversal mirrors it from zero into the previous duration.
 
 <a id="playback-is-alive"></a>
 ### Playback:isAlive
@@ -308,7 +333,7 @@ cycle's zero events. Reverse traversal mirrors that order from zero into the pre
 Playback:isAlive() -> boolean
 ```
 
-Returns `true` until a Completion is published. Paused Playbacks are alive.
+Returns `true` until a Completion is published. Idle and paused Playbacks are alive.
 
 <a id="playback-get-completion"></a>
 ### Playback:getCompletion
@@ -317,7 +342,6 @@ Returns `true` until a Completion is published. Paused Playbacks are alive.
 Playback:getCompletion() -> Completion?
 ```
 
-Returns `nil` while alive, then the frozen terminal result. Common implementation failure reasons
-include `callbackFailed`, `cleanupFailed`, `clockReadFailed`, `adapterDestroyed`,
-`catchUpLimitExceeded`, and `numericOverflow`; `reason` remains a string because cancellation may
-carry a host-authored reason.
+Returns `nil` while alive, then the frozen result. Core failure reasons include `callbackFailed`,
+`cleanupFailed`, `operationFailed`, `catchUpLimitExceeded`, and `numericOverflow`; the optional
+driver adds provider and scheduling failure reasons.

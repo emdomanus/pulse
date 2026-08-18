@@ -14,9 +14,8 @@
 type Builder<ContextT> = {
 	duration: (self: Builder<ContextT>, seconds: number) -> Builder<ContextT>,
 	loop: (self: Builder<ContextT>, enabled: boolean?) -> Builder<ContextT>,
-	addressPolicy: (self: Builder<ContextT>, policy: AddressPolicy) -> Builder<ContextT>,
 	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
-	update: (self: Builder<ContextT>, update: Update<ContextT>) -> Builder<ContextT>,
+	sample: (self: Builder<ContextT>, sample: Sample<ContextT>) -> Builder<ContextT>,
 	onPlay: (self: Builder<ContextT>, callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>,
 	onAddress: (
 		self: Builder<ContextT>,
@@ -36,10 +35,9 @@ type Builder<ContextT> = {
 | --- | --- |
 | [`duration`](#builder-duration) | Sets the required nonnegative duration |
 | [`loop`](#builder-loop) | Enables or disables looping |
-| [`addressPolicy`](#builder-address-policy) | Selects `skip`, `rebuild`, or `cancel` |
-| [`event`](#builder-event) | Appends one event |
-| [`update`](#builder-update) | Appends one continuous interval |
-| [`onPlay`](#builder-on-play) | Sets generation setup |
+| [`event`](#builder-event) | Appends one discrete event |
+| [`sample`](#builder-sample) | Appends one absolute sampled interval |
+| [`onPlay`](#builder-on-play) | Sets cleanup-generation setup |
 | [`onAddress`](#builder-on-address) | Sets address materialization |
 | [`onLoop`](#builder-on-loop) | Sets the authored loop observer |
 | [`compile`](#builder-compile) | Validates and returns an immutable Sequence |
@@ -51,8 +49,9 @@ type Builder<ContextT> = {
 Pulse.builder<ContextT>() -> Builder<ContextT>
 ```
 
-Creates an empty builder. The default address policy is `skip`; looping defaults to `false`.
-Luau infers a parameterless generic constructor from its expected type:
+Creates an empty builder with looping disabled. Address behavior is intentionally absent: callers
+select it when creating or seeking a Playback. Luau infers the parameterless generic constructor
+from its expected type:
 
 ```luau
 local builder: Pulse.Builder<PresentationContext> = Pulse.builder()
@@ -65,8 +64,8 @@ local builder: Pulse.Builder<PresentationContext> = Pulse.builder()
 Builder<ContextT>:duration(seconds: number) -> Builder<ContextT>
 ```
 
-Sets the required sequence duration and returns the same Builder. Zero is valid only for a
-non-looping Sequence.
+Sets the required finite sequence duration and returns the same Builder. It must be nonnegative;
+zero is valid only for a non-looping Sequence.
 
 <a id="builder-loop"></a>
 ### Builder:loop
@@ -77,15 +76,6 @@ Builder<ContextT>:loop(enabled: boolean?) -> Builder<ContextT>
 
 Enables looping when omitted or `true`, and disables it when `false`.
 
-<a id="builder-address-policy"></a>
-### Builder:addressPolicy
-
-```luau
-Builder<ContextT>:addressPolicy(policy: AddressPolicy) -> Builder<ContextT>
-```
-
-Sets the policy for Playback seeks and discontinuous clock changes.
-
 <a id="builder-event"></a>
 ### Builder:event
 
@@ -95,14 +85,15 @@ Builder<ContextT>:event(event: Event<ContextT>) -> Builder<ContextT>
 
 Copies and appends an event. Compilation preserves authored order for equal times.
 
-<a id="builder-update"></a>
-### Builder:update
+<a id="builder-sample"></a>
+### Builder:sample
 
 ```luau
-Builder<ContextT>:update(update: Update<ContextT>) -> Builder<ContextT>
+Builder<ContextT>:sample(sample: Sample<ContextT>) -> Builder<ContextT>
 ```
 
-Copies and appends a continuous update interval.
+Copies and appends an absolute sampled interval. Samples describe state at the final position; they
+do not integrate a delta.
 
 <a id="builder-on-play"></a>
 ### Builder:onPlay
@@ -111,7 +102,7 @@ Copies and appends a continuous update interval.
 Builder<ContextT>:onPlay(callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>
 ```
 
-Sets the callback that opens each initial or rebuilt generation.
+Sets the callback that opens the initial generation and every reconstructed generation.
 
 <a id="builder-on-address"></a>
 ### Builder:onAddress
@@ -122,8 +113,8 @@ Builder<ContextT>:onAddress(
 ) -> Builder<ContextT>
 ```
 
-Sets the callback that materializes host-owned state after an initial placement, seek, or clock
-discontinuity is established.
+Sets the callback that materializes host-owned state after an initial placement or explicit seek
+has established its exact target.
 
 <a id="builder-on-loop"></a>
 ### Builder:onLoop

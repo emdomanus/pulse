@@ -14,7 +14,7 @@ type SequenceAddress = DefTypes.SequenceAddress
 type SequenceBoundary = Types.SequenceBoundary
 type SequenceImpl = Types.StoredSequenceImpl
 type StoredEvent = Types.StoredEvent
-type StoredUpdate = Types.StoredUpdate
+type StoredSample = Types.StoredSample
 type TraversalDirection = DefTypes.TraversalDirection
 
 type RuntimeModule = {
@@ -28,7 +28,7 @@ type RuntimeModule = {
 	boundaryAt: (sequence: Sequence, position: PlaybackPosition) -> SequenceBoundary?,
 	eventRangeAt: (sequence: Sequence, localTimePosition: number) -> (number, number),
 	getEvent: (sequence: Sequence, index: number) -> StoredEvent,
-	getUpdates: (sequence: Sequence) -> { StoredUpdate },
+	getSamples: (sequence: Sequence) -> { StoredSample },
 	getOnPlay: (sequence: Sequence) -> EventCallback?,
 	getOnAddress: (sequence: Sequence) -> AddressCallback?,
 	getOnLoop: (sequence: Sequence) -> LoopCallback?,
@@ -290,8 +290,8 @@ local function getEvent(sequence: Sequence, index: number): StoredEvent
 	return event
 end
 
-local function getUpdates(sequence: Sequence): { StoredUpdate }
-	return asSequenceImpl(sequence)._updates
+local function getSamples(sequence: Sequence): { StoredSample }
+	return asSequenceImpl(sequence)._samples
 end
 
 local function getOnPlay(sequence: Sequence): EventCallback?
@@ -313,7 +313,7 @@ local module: RuntimeModule = {
 	boundaryAt = boundaryAt,
 	eventRangeAt = eventRangeAt,
 	getEvent = getEvent,
-	getUpdates = getUpdates,
+	getSamples = getSamples,
 	getOnPlay = getOnPlay,
 	getOnAddress = getOnAddress,
 	getOnLoop = getOnLoop,

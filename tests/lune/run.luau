@@ -8,5 +8,6 @@ type HarnessApi = {
 local requireUnknown = (require :: unknown) :: RequireUnknown
 local Harness = (requireUnknown("./lib/testHarness") :: unknown) :: HarnessApi
 
-requireUnknown("./specs/playback.spec")
+requireUnknown("./specs/core.spec")
+requireUnknown("./specs/clockDriver.spec")
 Harness.run()

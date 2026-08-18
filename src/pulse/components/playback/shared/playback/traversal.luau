@@ -8,7 +8,6 @@ local SequenceTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.co
 local SequenceRuntime = require(script.Parent.Parent.Parent.Parent.sequence.shared.sequence.runtime)
 local Lifecycle = require(script.Parent.lifecycle)
 
-type AddressPolicy = DefTypes.AddressPolicy
 type AddressCause = DefTypes.AddressCause
 type AddressInfo = DefTypes.AddressInfo
 type AddressMode = DefTypes.AddressMode
@@ -29,6 +28,8 @@ type TraversalModule = {
 	) -> boolean,
 	reconcileTo: (self: PlaybackImpl, target: PlaybackPosition, direction: TraversalDirection) -> boolean,
 	prepareDirection: (self: PlaybackImpl, direction: TraversalDirection) -> boolean,
+	prepareStationaryDirection: (self: PlaybackImpl, direction: TraversalDirection) -> boolean,
+	finalizeAddressDirection: (self: PlaybackImpl, direction: TraversalDirection) -> boolean,
 	selectNextBoundary: (self: PlaybackImpl, direction: TraversalDirection) -> SequenceBoundary?,
 	beginGeneration: (self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean) -> boolean,
 	reconstructTo: (self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean) -> boolean,
@@ -36,8 +37,7 @@ type TraversalModule = {
 	applyAddressTarget: (
 		self: PlaybackImpl,
 		target: PlaybackPosition,
-		policy: AddressPolicy,
-		reason: string,
+		mode: AddressMode,
 		cause: AddressCause,
 		direction: TraversalDirection?
 	) -> boolean,
@@ -143,6 +143,65 @@ local function runEventsAt(self: PlaybackImpl, timePosition: number, forward: bo
 	return true
 end
 
+local function completeForwardJoin(self: PlaybackImpl): boolean
+	local boundary = self._position
+	local change: LoopChange = {
+		fromLoopIndex = boundary.loopIndex,
+		toLoopIndex = boundary.loopIndex + 1,
+		direction = "forward",
+	}
+	if not emitLoop(self, change) then
+		return false
+	end
+	local nextPosition: PlaybackPosition = {
+		timePosition = 0,
+		loopIndex = boundary.loopIndex + 1,
+		unwrappedTimePosition = boundary.unwrappedTimePosition,
+	}
+	local nextBoundary = SequenceRuntime.boundaryAt(self._sequence, nextPosition)
+	if nextBoundary == nil then
+		Lifecycle.requestTerminal(self, "failed", "numericOverflow")
+		return false
+	end
+	self._position = nextBoundary
+	if not runEventsAt(self, 0, true) then
+		return false
+	end
+	self._direction = "forward"
+	self._boundaryState = "after"
+	return true
+end
+
+local function completeBackwardJoin(self: PlaybackImpl): boolean
+	local boundary = self._position
+	local duration = self._sequence:getDuration()
+	local change: LoopChange = {
+		fromLoopIndex = boundary.loopIndex,
+		toLoopIndex = boundary.loopIndex - 1,
+		direction = "backward",
+	}
+	if not emitLoop(self, change) then
+		return false
+	end
+	local previousPosition: PlaybackPosition = {
+		timePosition = duration,
+		loopIndex = boundary.loopIndex - 1,
+		unwrappedTimePosition = boundary.unwrappedTimePosition,
+	}
+	local previousBoundary = SequenceRuntime.boundaryAt(self._sequence, previousPosition)
+	if previousBoundary == nil then
+		Lifecycle.requestTerminal(self, "failed", "numericOverflow")
+		return false
+	end
+	self._position = previousBoundary
+	if not runEventsAt(self, duration, false) then
+		return false
+	end
+	self._direction = "backward"
+	self._boundaryState = "before"
+	return true
+end
+
 local function processBoundary(
 	self: PlaybackImpl,
 	boundary: SequenceBoundary,
@@ -157,54 +216,16 @@ local function processBoundary(
 		if not runEventsAt(self, duration, true) then
 			return false
 		end
-		local change: LoopChange = {
-			fromLoopIndex = boundary.loopIndex,
-			toLoopIndex = boundary.loopIndex + 1,
-			direction = "forward",
-		}
-		if not emitLoop(self, change) then
-			return false
-		end
-		local nextPosition: PlaybackPosition = {
-			timePosition = 0,
-			loopIndex = boundary.loopIndex + 1,
-			unwrappedTimePosition = boundary.unwrappedTimePosition,
-		}
-		local nextBoundary = SequenceRuntime.boundaryAt(self._sequence, nextPosition)
-		if nextBoundary == nil then
-			Lifecycle.requestTerminal(self, "failed", "numericOverflow")
-			return false
-		end
-		self._position = nextBoundary
-		if not runEventsAt(self, 0, true) then
-			return false
-		end
+		self._direction = "forward"
+		self._boundaryState = "forwardJoinPending"
+		return completeForwardJoin(self)
 	elseif looping and not forward and boundary.timePosition == 0 and initial ~= true then
 		if not runEventsAt(self, 0, false) then
 			return false
 		end
-		local change: LoopChange = {
-			fromLoopIndex = boundary.loopIndex,
-			toLoopIndex = boundary.loopIndex - 1,
-			direction = "backward",
-		}
-		if not emitLoop(self, change) then
-			return false
-		end
-		local previousPosition: PlaybackPosition = {
-			timePosition = duration,
-			loopIndex = boundary.loopIndex - 1,
-			unwrappedTimePosition = boundary.unwrappedTimePosition,
-		}
-		local previousBoundary = SequenceRuntime.boundaryAt(self._sequence, previousPosition)
-		if previousBoundary == nil then
-			Lifecycle.requestTerminal(self, "failed", "numericOverflow")
-			return false
-		end
-		self._position = previousBoundary
-		if not runEventsAt(self, duration, false) then
-			return false
-		end
+		self._direction = "backward"
+		self._boundaryState = "backwardJoinPending"
+		return completeBackwardJoin(self)
 	else
 		if not runEventsAt(self, boundary.timePosition, forward) then
 			return false
@@ -215,19 +236,111 @@ local function processBoundary(
 end
 
 local function prepareDirection(self: PlaybackImpl, direction: TraversalDirection): boolean
+	local state = self._boundaryState
+	if state == "forwardJoinPending" then
+		self._direction = direction
+		if direction == "forward" then
+			return completeForwardJoin(self)
+		end
+		if not runEventsAt(self, self._position.timePosition, false) then
+			return false
+		end
+		self._boundaryState = "before"
+		return true
+	elseif state == "backwardJoinPending" then
+		self._direction = direction
+		if direction == "backward" then
+			return completeBackwardJoin(self)
+		end
+		if not runEventsAt(self, self._position.timePosition, true) then
+			return false
+		end
+		self._boundaryState = "after"
+		return true
+	end
 	if self._direction == direction then
 		return true
 	end
 	self._direction = direction
-	if self._boundaryState == nil then
+	if state == nil then
+		if self._sequence:isLooping() then
+			if direction == "forward" and self._position.timePosition == self._sequence:getDuration() then
+				self._boundaryState = "forwardJoinPending"
+				return completeForwardJoin(self)
+			elseif direction == "backward" and self._position.timePosition == 0 then
+				self._boundaryState = "backwardJoinPending"
+				return completeBackwardJoin(self)
+			end
+		end
 		return true
 	end
-	if direction == "forward" and self._boundaryState == "before" then
+	if direction == "forward" and state == "before" then
 		return processBoundary(self, self._position, direction)
-	elseif direction == "backward" and self._boundaryState == "after" then
+	elseif direction == "backward" and state == "after" then
 		return processBoundary(self, self._position, direction)
 	end
 	return true
+end
+
+local function prepareStationaryDirection(self: PlaybackImpl, direction: TraversalDirection): boolean
+	local state = self._boundaryState
+	local matchingPending = (state == "forwardJoinPending" and direction == "forward")
+		or (state == "backwardJoinPending" and direction == "backward")
+	if matchingPending then
+		self._direction = direction
+		return true
+	elseif state == nil and self._sequence:isLooping() then
+		self._direction = direction
+		if direction == "forward" and self._position.timePosition == self._sequence:getDuration() then
+			self._boundaryState = "forwardJoinPending"
+		elseif direction == "backward" and self._position.timePosition == 0 then
+			self._boundaryState = "backwardJoinPending"
+		end
+		return true
+	end
+	return prepareDirection(self, direction)
+end
+
+local function finalizeAddressDirection(self: PlaybackImpl, direction: TraversalDirection): boolean
+	local state = self._boundaryState
+	if state == "forwardJoinPending" then
+		if direction == "forward" then
+			self._direction = direction
+			return true
+		end
+		self._direction = direction
+		if not runEventsAt(self, self._position.timePosition, false) then
+			return false
+		end
+		self._boundaryState = "before"
+		return true
+	elseif state == "backwardJoinPending" then
+		if direction == "backward" then
+			self._direction = direction
+			return true
+		end
+		self._direction = direction
+		if not runEventsAt(self, self._position.timePosition, true) then
+			return false
+		end
+		self._boundaryState = "after"
+		return true
+	end
+	if
+		self._sequence:isLooping()
+		and self._position.timePosition == 0
+		and state == "after"
+		and direction == "backward"
+		and self._direction ~= direction
+	then
+		self._direction = direction
+		if not runEventsAt(self, 0, false) then
+			return false
+		end
+		self._boundaryState = "backwardJoinPending"
+		return true
+	end
+	return prepareDirection(self, direction)
 end
 
 local function selectNextBoundary(self: PlaybackImpl, direction: TraversalDirection): SequenceBoundary?
@@ -263,8 +376,24 @@ local function reconcileTo(self: PlaybackImpl, target: PlaybackPosition, directi
 			Lifecycle.requestTerminal(self, "failed", "numericOverflow")
 			return false
 		end
-		if not processBoundary(self, boundary, direction) then
-			return false
+		local exactDurationTarget = self._sequence:isLooping()
+			and direction == "forward"
+			and target.timePosition == self._sequence:getDuration()
+			and boundary.timePosition == target.timePosition
+			and boundary.loopIndex == target.loopIndex
+			and boundary.unwrappedTimePosition == target.unwrappedTimePosition
+		if exactDurationTarget then
+			self._position = boundary
+			self._direction = "forward"
+			if not runEventsAt(self, boundary.timePosition, true) then
+				return false
+			end
+			self._boundaryState = "forwardJoinPending"
+			break
+		else
+			if not processBoundary(self, boundary, direction) then
+				return false
+			end
 		end
 	end
 
@@ -313,7 +442,6 @@ local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, dispo
 	if target.unwrappedTimePosition > base.unwrappedTimePosition and not reconcileTo(self, target, "forward") then
 		return false
 	end
-	self._updateCursor = self._position.unwrappedTimePosition
 	return true
 end
 
@@ -321,42 +449,47 @@ local function placeWithoutTraversal(self: PlaybackImpl, target: PlaybackPositio
 	local boundary = SequenceRuntime.boundaryAt(self._sequence, target)
 	self._position = boundary or target
 	if boundary ~= nil and direction ~= nil then
-		self._boundaryState = if direction == "forward" then "after" else "before"
+		if
+			self._sequence:isLooping()
+			and direction == "forward"
+			and target.timePosition == self._sequence:getDuration()
+		then
+			self._boundaryState = "forwardJoinPending"
+		elseif self._sequence:isLooping() and direction == "backward" and target.timePosition == 0 then
+			self._boundaryState = "backwardJoinPending"
+		else
+			self._boundaryState = if direction == "forward" then "after" else "before"
+		end
 	else
 		self._boundaryState = nil
 	end
-	self._updateCursor = self._position.unwrappedTimePosition
+	self._direction = direction
 end
 
 local function applyAddressTarget(
 	self: PlaybackImpl,
 	target: PlaybackPosition,
-	policy: AddressPolicy,
-	reason: string,
+	mode: AddressMode,
 	cause: AddressCause,
 	direction: TraversalDirection?
 ): boolean
-	if policy == "cancel" then
-		Lifecycle.requestTerminal(self, "cancelled", reason)
-		return false
-	end
-
 	local from = publicPosition(self._position)
-	if policy == "rebuild" then
+	if mode == "reconstruct" then
 		if not reconstructTo(self, target, true) then
 			return false
 		end
 		return emitAddress(self, cause, "reconstruct" :: AddressMode, from)
-	else
-		placeWithoutTraversal(self, target, direction)
-		return emitAddress(self, cause, "skip" :: AddressMode, from)
 	end
+	placeWithoutTraversal(self, target, direction)
+	return emitAddress(self, cause, "skip" :: AddressMode, from)
 end
 
 local module: TraversalModule = {
 	emitAddress = emitAddress,
 	reconcileTo = reconcileTo,
 	prepareDirection = prepareDirection,
+	prepareStationaryDirection = prepareStationaryDirection,
+	finalizeAddressDirection = finalizeAddressDirection,
 	selectNextBoundary = selectNextBoundary,
 	beginGeneration = beginGeneration,
 	reconstructTo = reconstructTo,

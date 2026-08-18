@@ -4,54 +4,18 @@
 
 local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.components.playback)
-local TemporalAdapterTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.managers.temporalAdapter)
-local TemporalAdapter =
-	require(script.Parent.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 
 type Completion = DefTypes.Completion
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
-type PlaybackSink = TemporalAdapterTypes.PlaybackSink
 type TerminalStatus = DefTypes.TerminalStatus
 
 type LifecycleModule = {
-	cancelScheduled: (self: PlaybackImpl) -> (),
-	stopUpdating: (self: PlaybackImpl) -> (),
-	detach: (self: PlaybackImpl) -> (),
 	disposeGeneration: (self: PlaybackImpl) -> boolean,
 	finish: (self: PlaybackImpl, status: TerminalStatus, reason: string?) -> (),
 	requestTerminal: (self: PlaybackImpl, status: TerminalStatus, reason: string?) -> (),
 }
 
 local MAX_RECONCILIATION_WORK = 4_096
-
-local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
-	return self
-end
-
-local function cancelScheduled(self: PlaybackImpl)
-	local id = self._scheduledId
-	self._scheduledId = nil
-	self._scheduledDirection = nil
-	self._scheduledBoundary = nil
-	if id ~= nil then
-		TemporalAdapter._cancel(self._adapter, id)
-	end
-end
-
-local function stopUpdating(self: PlaybackImpl)
-	if self._updating then
-		self._updating = false
-		TemporalAdapter._setUpdating(self._adapter, asPlaybackSink(self), false)
-	end
-end
-
-local function detach(self: PlaybackImpl)
-	stopUpdating(self)
-	if self._attached then
-		self._attached = false
-		TemporalAdapter._detach(self._adapter, asPlaybackSink(self))
-	end
-end
 
 local function disposeGeneration(self: PlaybackImpl): boolean
 	local pending = self._cleanup
@@ -96,10 +60,8 @@ local function finish(self: PlaybackImpl, status: TerminalStatus, reason: string
 		return
 	end
 	self._finishing = true
-	cancelScheduled(self)
-	detach(self)
 	if not disposeGeneration(self) and status ~= "failed" then
-		status = "failed"
+		status = "failed" :: TerminalStatus
 		reason = "cleanupFailed"
 	end
 	self._context = nil
@@ -130,9 +92,6 @@ local function requestTerminal(self: PlaybackImpl, status: TerminalStatus, reaso
 end
 
 local module: LifecycleModule = {
-	cancelScheduled = cancelScheduled,
-	stopUpdating = stopUpdating,
-	detach = detach,
 	disposeGeneration = disposeGeneration,
 	finish = finish,
 	requestTerminal = requestTerminal,

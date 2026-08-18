@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Documentation for Pulse, a clock-driven sequence playback runtime for Roblox.",
+  "description": "Documentation for Pulse, an absolute-time sequence runtime for Roblox.",
   "scripts": {
     "docs:dev": "vitepress dev docs --host 127.0.0.1",
     "docs:build": "vitepress build docs",

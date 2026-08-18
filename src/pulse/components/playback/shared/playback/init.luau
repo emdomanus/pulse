@@ -5,18 +5,13 @@
 local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
 local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.types.components.playback)
 local SequenceTypes = require(script.Parent.Parent.Parent.Parent.types.components.sequence)
-local TemporalAdapterTypes = require(script.Parent.Parent.Parent.Parent.types.managers.temporalAdapter)
 local SequenceRuntime = require(script.Parent.Parent.Parent.sequence.shared.sequence.runtime)
-local TemporalAdapterModule =
-	require(script.Parent.Parent.Parent.Parent.managers.temporalAdapter.shared.temporalAdapter)
 local Lifecycle = require(script.lifecycle)
 local Runtime = require(script.runtime)
 local Traversal = require(script.traversal)
 
 type AddressCause = DefTypes.AddressCause
 type AddressMode = DefTypes.AddressMode
-type ClockChange = TemporalAdapterTypes.ClockChange
-type ClockSample = TemporalAdapterTypes.ClockSample
 type Completion = DefTypes.Completion
 type EndedBinding = PlaybackTypes.EndedBinding
 type EndedCallback = PlaybackTypes.EndedCallback
@@ -26,31 +21,28 @@ type Playback = PlaybackTypes.Playback
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
 type PlaybackOptions = PlaybackTypes.PlaybackOptions
 type PlaybackPosition = DefTypes.PlaybackPosition
-type PlaybackSink = TemporalAdapterTypes.PlaybackSink
+type TraversalForecast = PlaybackTypes.TraversalForecast
 type SequenceAddress = DefTypes.SequenceAddress
 type Sequence<ContextT> = SequenceTypes.Sequence<ContextT>
 type Status = DefTypes.Status
 type StoredSequence = SequenceTypes.StoredSequence
-type TemporalAdapterType = TemporalAdapterTypes.TemporalAdapter
 type TerminalRequest = PlaybackTypes.TerminalRequest
+type TimeSample = DefTypes.TimeSample
 
 type PlaybackModule = {
-	new: <ContextT>(
-		sequence: Sequence<ContextT>,
-		adapter: TemporalAdapterType,
-		context: ContextT,
-		options: PlaybackOptions?
-	) -> Playback,
+	new: <ContextT>(sequence: Sequence<ContextT>, context: ContextT, options: PlaybackOptions?) -> Playback,
+	_fail: (playback: Playback, reason: string) -> (),
+	_getTraversalForecast: (playback: Playback) -> TraversalForecast,
+	_validateAddress: (playback: Playback, address: SequenceAddress) -> SequenceAddress,
+	_projectSourcePosition: (playback: Playback, sourcePosition: number) -> PlaybackPosition?,
+	_acceptSourceSample: (playback: Playback, sample: TimeSample) -> (),
+	_getAcceptedSample: (playback: Playback) -> TimeSample?,
 }
 
 local Playback = {}
 Playback.__index = Playback
 
 local function noopRelease() end
-
-local function asPlaybackSink(self: PlaybackImpl): PlaybackSink
-	return self
-end
 
 local function publicPosition(position: PlaybackPosition): PlaybackPosition
 	return {
@@ -70,44 +62,38 @@ local function validateInitialMode(mode: AddressMode?): AddressMode
 	return resolved
 end
 
-local function ConstructPlayback<ContextT>(
-	sequence: Sequence<ContextT>,
-	adapter: TemporalAdapterType,
-	context: ContextT,
-	options: PlaybackOptions?
-): Playback
+local function validateAddressMode(mode: AddressMode): AddressMode
+	assert(mode == "reconstruct" or mode == "skip", "Pulse address mode must be 'reconstruct' or 'skip'")
+	return mode
+end
+
+local function asImpl(playback: Playback): PlaybackImpl
+	return (playback :: unknown) :: PlaybackImpl
+end
+
+local function ConstructPlayback<ContextT>(sequence: Sequence<ContextT>, context: ContextT, options: PlaybackOptions?): Playback
 	local config: PlaybackOptions = options or {}
 	local speed = config.playbackSpeed or 1
 	local initialMode = validateInitialMode(config.initialMode)
 	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
 	local storedSequence = (sequence :: unknown) :: StoredSequence
 	local initial = SequenceRuntime.validateAddress(storedSequence, config.position or { timePosition = 0 })
-	local self: PlaybackImpl
-	local function reachedCallback(_now: number, _direction: unknown)
-		Runtime.onReached(self)
-	end
-	self = (
+	local self: PlaybackImpl = (
 		setmetatable({
 			_sequence = storedSequence,
 			_context = context,
-			_adapter = adapter,
 			_status = "idle" :: Status,
 			_completion = nil,
 			_playbackSpeed = speed,
-			_anchorClock = 0,
+			_anchorSource = 0,
 			_anchorSequence = initial.unwrappedTimePosition,
-			_clockRate = 0,
+			_acceptedSample = nil,
+			_resumePending = false,
 			_position = initial,
 			_initialPosition = initial,
 			_initialMode = initialMode,
 			_boundaryState = nil,
 			_direction = nil,
-			_scheduledId = nil,
-			_scheduledDirection = nil,
-			_scheduledBoundary = nil,
-			_attached = false,
-			_updating = false,
-			_updateCursor = initial.unwrappedTimePosition,
 			_cleanup = {},
 			_endedBindings = {},
 			_loopedBindings = {},
@@ -116,34 +102,22 @@ local function ConstructPlayback<ContextT>(
 			_finishing = false,
 			_deliveringEnded = false,
 			_terminalRequest = nil,
-			_reachedCallback = reachedCallback,
 			_workCount = 0,
-			_appliedClockSerial = 0,
 		}, Playback) :: unknown
 	) :: PlaybackImpl
 	return self
 end
 
-function Playback.play(self: PlaybackImpl): Playback
+function Playback.play(self: PlaybackImpl, sample: TimeSample): Playback
 	if self._status ~= "idle" or self._finishing then
 		return self
 	end
-	local sample, clockSerial = TemporalAdapterModule._snapshot(self._adapter)
-	if sample == nil then
-		Lifecycle.finish(self, "failed", "clockReadFailed")
-		return self
-	end
+	local accepted = Runtime.copySample(sample)
 	self._status = "playing"
-	self._anchorClock = sample.timePosition
+	self._acceptedSample = accepted
+	self._anchorSource = accepted.position
 	self._anchorSequence = self._initialPosition.unwrappedTimePosition
-	self._clockRate = sample.rate
-	self._appliedClockSerial = clockSerial
 	self._position = self._initialPosition
-	if not TemporalAdapterModule._attach(self._adapter, asPlaybackSink(self)) then
-		Lifecycle.finish(self, "failed", "adapterAttachFailed")
-		return self
-	end
-	self._attached = true
 
 	self._busy = true
 	self._workCount = 0
@@ -157,15 +131,15 @@ function Playback.play(self: PlaybackImpl): Playback
 		end
 	end
 	if initialized then
-		Traversal.emitAddress(self, "initial" :: AddressCause, self._initialMode, nil)
+		initialized = Traversal.emitAddress(self, "initial" :: AddressCause, self._initialMode, nil)
 	end
-	if self._terminalRequest == nil and self._sequence:getDuration() == 0 then
-		Lifecycle.requestTerminal(self, "completed", nil)
+	if initialized then
+		initialized = Runtime.runSamples(self)
 	end
-	if self._terminalRequest == nil then
-		Runtime.reanchor(self, sample)
-		Runtime.refreshOwnership(self, false)
+	if initialized then
+		Runtime.finalizeAddress(self)
 	end
+
 	local terminal: TerminalRequest? = self._terminalRequest
 	self._terminalRequest = nil
 	self._busy = false
@@ -177,30 +151,30 @@ function Playback.play(self: PlaybackImpl): Playback
 	return self
 end
 
-function Playback.pause(self: PlaybackImpl)
+function Playback.evaluate(self: PlaybackImpl, sample: TimeSample): boolean
+	local accepted = Runtime.copySample(sample)
 	if self._status ~= "playing" or self._finishing or self._terminalRequest ~= nil then
-		return
+		return false
 	end
-	local sample, clockSerial = Runtime.snapshotClock(self)
-	if sample ~= nil then
+	Runtime.enqueue(self, {
+		kind = "evaluate" :: "evaluate",
+		sample = accepted,
+	})
+	return true
+end
+
+function Playback.pause(self: PlaybackImpl)
+	if self._status == "playing" and not self._finishing and self._terminalRequest == nil then
 		Runtime.enqueue(self, {
-			kind = "pause",
-			sample = sample,
-			clockSerial = clockSerial,
+			kind = "pause" :: "pause",
 		})
 	end
 end
 
 function Playback.resume(self: PlaybackImpl)
-	if self._status ~= "paused" or self._finishing or self._terminalRequest ~= nil then
-		return
-	end
-	local sample, clockSerial = Runtime.snapshotClock(self)
-	if sample ~= nil then
+	if self._status == "paused" and not self._finishing and self._terminalRequest == nil then
 		Runtime.enqueue(self, {
-			kind = "resume",
-			sample = sample,
-			clockSerial = clockSerial,
+			kind = "resume" :: "resume",
 		})
 	end
 end
@@ -212,15 +186,10 @@ function Playback.setPlaybackSpeed(self: PlaybackImpl, speed: number)
 		and not self._finishing
 		and self._terminalRequest == nil
 	then
-		local sample, clockSerial = Runtime.snapshotClock(self)
-		if sample ~= nil then
-			Runtime.enqueue(self, {
-				kind = "speed",
-				speed = speed,
-				sample = sample,
-				clockSerial = clockSerial,
-			})
-		end
+		Runtime.enqueue(self, {
+			kind = "speed" :: "speed",
+			speed = speed,
+		})
 	end
 end
 
@@ -228,48 +197,24 @@ function Playback.getPlaybackSpeed(self: PlaybackImpl): number
 	return self._playbackSpeed
 end
 
-function Playback.seek(self: PlaybackImpl, address: SequenceAddress): boolean
+function Playback.seek(self: PlaybackImpl, address: SequenceAddress, mode: AddressMode): boolean
+	local validatedMode = validateAddressMode(mode)
 	local validated = SequenceRuntime.validateAddress(self._sequence, address)
-	if self._status == "idle" or self._completion ~= nil or self._finishing or self._terminalRequest ~= nil then
-		return false
-	end
-	local sample, clockSerial = Runtime.snapshotClock(self)
-	if sample == nil then
+	if (self._status ~= "playing" and self._status ~= "paused") or self._finishing or self._terminalRequest ~= nil then
 		return false
 	end
 	Runtime.enqueue(self, {
-		kind = "seek",
+		kind = "seek" :: "seek",
 		address = {
 			timePosition = validated.timePosition,
 			loopIndex = validated.loopIndex,
 		},
-		sample = sample,
-		clockSerial = clockSerial,
+		mode = validatedMode :: AddressMode,
 	})
 	return true
 end
 
 function Playback.getPosition(self: PlaybackImpl): PlaybackPosition
-	if self._status == "playing" and not self._busy and not self._finishing then
-		local sample, clockSerial = TemporalAdapterModule._snapshot(self._adapter)
-		if sample == nil then
-			Lifecycle.requestTerminal(self, "failed", "clockReadFailed")
-		elseif clockSerial > self._appliedClockSerial then
-			return publicPosition(self._position)
-		else
-			local target = Runtime.derivePosition(self, sample.timePosition)
-			if target ~= nil then
-				if target == self._position.unwrappedTimePosition then
-					return publicPosition(self._position)
-				end
-				local ok, position = pcall(SequenceRuntime.positionAt, self._sequence, target)
-				if ok then
-					return position
-				end
-			end
-			Lifecycle.requestTerminal(self, "failed", "numericOverflow")
-		end
-	end
 	return publicPosition(self._position)
 end
 
@@ -367,34 +312,42 @@ function Playback.getCompletion(self: PlaybackImpl): Completion?
 	return self._completion
 end
 
-function Playback._onAdapterClockChanged(
-	self: PlaybackImpl,
-	change: ClockChange,
-	sample: ClockSample,
-	clockSerial: number
-)
-	Runtime.enqueue(self, {
-		kind = "clockChange",
-		change = change,
-		sample = sample,
-		clockSerial = clockSerial,
-	})
+local function fail(playback: Playback, reason: string)
+	Lifecycle.requestTerminal(asImpl(playback), "failed", reason)
 end
 
-function Playback._onAdapterPhase(self: PlaybackImpl, sample: ClockSample, clockSerial: number)
-	Runtime.enqueue(self, {
-		kind = "phase",
-		sample = sample,
-		clockSerial = clockSerial,
-	})
+local function getTraversalForecast(playback: Playback): TraversalForecast
+	return Runtime.getTraversalForecast(asImpl(playback))
 end
 
-function Playback._onAdapterDestroyed(self: PlaybackImpl, reason: string)
-	Lifecycle.requestTerminal(self, "failed", reason)
+local function validateAddress(playback: Playback, address: SequenceAddress): SequenceAddress
+	local validated = SequenceRuntime.validateAddress(asImpl(playback)._sequence, address)
+	return {
+		timePosition = validated.timePosition,
+		loopIndex = validated.loopIndex,
+	}
+end
+
+local function projectSourcePosition(playback: Playback, sourcePosition: number): PlaybackPosition?
+	return Runtime.projectSourcePosition(asImpl(playback), sourcePosition)
+end
+
+local function acceptSourceSample(playback: Playback, sample: TimeSample)
+	Runtime.acceptSourceSample(asImpl(playback), sample)
+end
+
+local function getAcceptedSample(playback: Playback): TimeSample?
+	return Runtime.getAcceptedSample(asImpl(playback))
 end
 
 local module: PlaybackModule = {
 	new = ConstructPlayback,
+	_fail = fail,
+	_getTraversalForecast = getTraversalForecast,
+	_validateAddress = validateAddress,
+	_projectSourcePosition = projectSourcePosition,
+	_acceptSourceSample = acceptSourceSample,
+	_getAcceptedSample = getAcceptedSample,
 }
 
 return module

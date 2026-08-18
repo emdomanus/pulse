@@ -1,106 +1,144 @@
 # Architecture
 
-Pulse has three runtime roles and one authoring helper.
+The dependency direction is deliberately one-way:
 
 ```text
-SequenceDefinition<ContextT> -> Builder/compiler -> immutable Sequence<ContextT>
-                                              |
-ProviderClock -> TemporalAdapter ----------> Playback -> authored callbacks
+SequenceDefinition<ContextT> -> compiler -> immutable Sequence<ContextT>
+                                                   |
+host TimeSample ------------------------------> raw Playback -> callbacks
+                                                   ^
+ProviderClock -> optional ClockDriver --------------|
 ```
+
+The raw core never requires a clock-driver type. `ClockDriver` depends on and drives `Playback`.
 
 ## Ownership
 
 | Role | Owns | Does not own |
 | --- | --- | --- |
-| `Sequence<ContextT>` | Validated immutable callbacks, update, loop, and discontinuity policy | Invocation context, clock state, or live playback lifecycle |
-| `Playback` | Per-play context, anchors, traversal cursor, local speed, scheduling intent, cleanup generation, completion | Clock or phase binding lifetime outside its adapter attachment |
-| `TemporalAdapter` | Borrowed-clock validation, attachments, one changed subscription, one lazy shared phase binding | The provider clock or authored side effects |
-| Host | Provider clock, execution phase, direction tokens, domain context and side effects | Sequence traversal internals |
+| `Sequence<ContextT>` | Validated immutable events, samples, loop setting, and authored hooks | Invocation context, address mode, clock state, cursor, or lifecycle |
+| Raw `Playback` | Context, source/sequence anchor, local speed, traversal cursor and provenance, loop identity, explicit addressing, cleanup generations, completion, callback serialization | Clock reads, scheduling, discontinuity records, revision policy, or wall time |
+| Optional `ClockDriver` | Provider validation/reads, changed subscription, previous/current boundary reconciliation, reached deadlines, shared phase fan-out, stale-task protection, attachment discontinuity mode | The borrowed clock, Sequence policy, host domain meaning, or side effects |
+| Host | Source samples or provider selection, traversal-versus-address meaning, discontinuity response, materialization policy, context, real frame delta, and side effects | Pulse traversal internals |
 
-Destroying an adapter detaches and fails its active playbacks; it never destroys the borrowed clock.
-Destroying a playback releases only that playback's task, adapter membership, observers, and cleanup.
+Destroying a driver fails its attached live Playbacks with `driverDestroyed`; provider destruction
+fails them with `clockDestroyed`. In both cases the provider is borrowed and is never destroyed by
+Pulse. Destroying or detaching one attachment releases only its own scheduling membership.
 
-### Playback implementation boundaries
+`ClockDriver:attach(raw, ...)` transfers exclusive temporal-control ownership to the returned
+`DrivenPlayback` until `detach()`. The raw reference remains structurally callable, but the host
+must not mutate it while attached because doing so bypasses driven reconciliation and scheduling
+refresh. Detach returns temporal-control ownership together with the still-live raw Playback.
 
-Playback remains one stateful object. Its implementation is separated into stateless modules that
-operate directly on that object; none creates a secondary view, port, or ownership record.
+## Raw time and anchors
 
-| Module | Responsibility |
-| --- | --- |
-| `playback/init.luau` | Metatable, construction, and Playback method implementations |
-| `playback/runtime.luau` | Clock anchoring, scheduling, update sampling, and serialized operations |
-| `playback/traversal.luau` | Authored boundary execution, loop traversal, reconstruction, and skip placement |
-| `playback/lifecycle.luau` | Task and adapter release, cleanup generations, and terminal completion delivery |
-
-## Scheduling model
-
-An event-only playback asks the provider clock for its next reached boundary. After a boundary runs,
-Pulse reschedules that task for the next authored boundary. No continuous phase callback is needed.
-
-An update interval makes a playback a continuous member only while the current traversal direction
-can intersect active update work. All updating playbacks on one adapter share its one `bindPhase`
-subscription. The adapter releases that binding when its last updating playback leaves.
-
-Use one adapter for playbacks that share an exact clock and execution phase. Use separate adapters
-when either identity differs.
-
-## Time and anchors
-
-Playback position is derived from an anchor:
+The core derives a target from the last accepted anchor:
 
 ```text
-sequence = anchorSequence + (clockNow - anchorClock) * playbackSpeed
+sequencePosition =
+    anchorSequence
+    + (sample.position - anchorSource) * playbackSpeed
 ```
 
-The provider's resolved clock rate selects whether scheduled work is traversing forward, backward,
-or dormant. The local playback speed multiplies clock displacement and may also reverse traversal.
-Pause, resume, and speed changes re-anchor at the current sample so time cannot snap or catch up
-through a paused interval.
+`TimeSample.position` already contains source movement, so `TimeSample.rate` is never multiplied
+into that displacement. Rate is an atomic description of the source at the sampled coordinate. A
+sampler receives `sample.rate * playbackSpeed`, which may be negative or zero.
 
-Continuous clock mapping changes reconcile to the change boundary before re-anchoring. A
-discontinuous change uses the sequence's
-[`AddressPolicy`](./api/types/definitions.md#address-policy).
+Core state changes only through `play(sample)`, `evaluate(sample)`, or explicit Playback controls.
+`getPosition()` returns the last accepted cursor and never reads or projects implicit time.
+At an explicitly addressed duration-side loop join, the exact identity remains visible until a
+future forward evaluation consumes the loop crossing and next-cycle zero boundary.
 
-## Address materialization
+### Mutation timestamps
 
-Natural traversal executes events and updates. Initial placement, manual seeks, and discontinuous
-clock changes are address operations. Each successful address reports an immutable
-[`AddressInfo`](./api/types/definitions.md#address-info) after the exact target cursor is established
-and before the Playback re-anchors and refreshes scheduling.
+Pause, speed, seek, cancel, and destroy act at the Playback's currently accepted evaluated
+coordinate. A raw host that needs a mutation at a newer coordinate must call `evaluate` first.
+The driven facade performs that current provider read/evaluation before external mutations while
+playing. Resume is special: the first subsequent sample re-anchors the stored paused position, so
+source movement during the pause is not traversed.
 
-| Address mode | Historical events | Cleanup generation |
+## Traversal and sampling
+
+Natural evaluation traverses every crossed discrete boundary exactly once. Equal-time events run
+in authored order forward and reverse authored order backward. Loop joins preserve exact identity:
+`{ timePosition = duration, loopIndex = n }` and `{ timePosition = 0, loopIndex = n + 1 }` share an
+unwrapped coordinate but remain distinct boundary positions.
+
+After all crossed events and loop hooks, each authored `Sample` active at the final local position
+runs once. Sample intervals use `[startTime, endTime)` in both traversal directions. A large or
+multi-loop jump therefore traverses historical events but does not manufacture historical sampler
+ticks. An equal-coordinate evaluation emits no event again and may sample active state once.
+
+Pulse supplies no real frame delta. A particle, mesh, physics, or other accumulator backend must
+receive its backend tick from the host outside Pulse.
+
+## Explicit addressing and materialization
+
+Address behavior belongs to each invocation:
+
+| Mode | Historical events | Cleanup generation |
 | --- | --- | --- |
-| `reconstruct` | Replayed forward from the target loop's zero boundary | Opened initially or replaced by a `rebuild` policy |
-| `skip` | Suppressed, including events exactly at the target | Existing generation retained; initial playback still opens its first generation |
+| `skip` | Suppressed, including events exactly at the target | Retained; initial placement opens the first generation |
+| `reconstruct` | Canonically replayed forward from local zero of the target loop | Opened initially or replaces the current generation |
 
-Pulse does not sample updates with a synthetic zero delta during an address. An authored
-`onAddress` callback may instead materialize host-defined active spans, curves, and leases at the
-reported target. Subsequent natural traversal begins from that target.
+Cancellation is `Playback:cancel(reason?)`, not an address mode. The same Sequence can be skipped
+by one call and reconstructed by another.
 
-## Callback and cleanup ownership
+Address ordering is fixed:
 
-Forward traversal calls `Event.run`; backward traversal calls `Event.reverse` when present. Pulse
-reverses traversal and its own recorded cursor, not arbitrary authored side effects. The reverse
-callback owns any domain-specific undo.
+1. establish or reconstruct the exact target;
+2. call `onAddress` with cause `initial` or `seek`;
+3. call each active absolute sampler once at the target;
+4. establish future traversal provenance (and let an optional driver refresh scheduling).
 
-`Pulse.playback` receives one typed invocation context and retains it for that Playback. The same
-value is passed to event, reverse, update, setup, address, and authored loop callbacks, allowing one
-compiled Sequence to serve many characters or world invocations without capturing per-play closures. Pulse
-releases the retained context after terminal cleanup and before publishing Completion.
+`onAddress` is the late-materialization seam for host-owned resources, leases, pools, or curve
+state at an arbitrary elapsed position. It does not expose provider-change metadata.
 
-`Playback:addCleanup` belongs to the current playback or rebuild generation. Cleanup executes in
-reverse registration order on rebuild or terminal completion. It is not per-event rollback.
+## Callback, cleanup, and failure invariants
 
-| Work | Time contract |
-| --- | --- |
-| Events, updates, loop crossings | Sequence timeline derived from the borrowed clock |
-| Playback speed and pause/resume | Sequence-local anchor operations |
-| Cleanup | Immediate lifecycle work; no delayed timer |
-| Catch-up guard | Bounded operation count, not elapsed time |
+`Event.run` handles forward traversal; `Event.reverse`, when present, handles backward traversal.
+Pulse reverses its cursor, not arbitrary authored side effects. One typed context is retained per
+Playback and passed to every authored callback.
 
-## Reentrancy and failure
+`Playback:addCleanup` belongs to the current generation. Reconstruction flushes the replaced
+generation in reverse registration order before setup/replay; terminal completion flushes the
+remaining generation the same way. Cleanup is not per-event undo.
 
-Clock notifications and nonterminal callback mutations are serialized through one playback
-operation queue. A terminal request interrupts remaining equal-time work. Authored callback errors
-become one immutable `Completion` with status `failed`; observer errors do not change playback
-state. Numeric loss of ordered boundary identity fails deterministically instead of guessing.
+Same-Playback nonterminal mutations requested inside callbacks are serialized. A terminal request
+interrupts remaining equal-time work. Callback and cleanup failures yield one immutable failed
+Completion. Catch-up and numeric precision limits fail deterministically rather than silently
+dropping authored events.
+
+While a Playback is driven, an authored callback may use its `PlaybackControl` synchronously. Those
+calls enter the raw Playback's operation queue and the driver refreshes after the enclosing
+evaluation. The callback capability must not be retained and invoked asynchronously while the raw
+Playback remains attached; asynchronous control belongs through `DrivenPlayback`.
+
+## Optional driver scheduling
+
+An attachment owns one next-boundary reached task. Attachments share one phase binding per driver
+whenever phase evaluation is required: an exact Sample is active, backward movement is poised at
+an excluded Sample `endTime`, an outward-matching zero-distance loop join is pending, or a
+synchronous callback-side `PlaybackControl:resume()` is awaiting its first post-resume sample. The
+excluded endpoint itself still emits no Sample. A pending join retains exact addressed identity
+through stationary notifications and is consumed only by actual source-coordinate movement. The
+first subsequent phase evaluation clears a pending resume without catch-up; an event-only
+attachment then releases phase ownership and schedules its next deadline. Event and completion
+boundaries stay schedulable outside these transient states.
+
+Each attachment records its scheduled absolute source coordinate and direction. A phase
+notification supplies one shared provider sample to every member; if an attachment's forecast is
+unchanged or differs only by bounded binary64 rounding, refresh keeps both the existing task and
+its original cached coordinate without another provider read or `rescheduleAt`. Reached checks use
+that cached coordinate because it is where the provider task is bound. Only new or materially
+changed deadlines receive a post-schedule read, so source movement during the scheduling call
+cannot skip a boundary.
+
+For a continuous provider mapping change, the driver reconciles the delivered previous boundary
+before using the new rate. For a reported discontinuity it first reconciles natural elapsed motion
+through the previous boundary, then applies the attachment's required `skip`, `reconstruct`, or
+`cancel` response without traversing the jump. Notifications are serialized internally; external
+provider revisions are neither required nor filtered.
+
+The accepted ownership correction and its relationship to the earlier clock-driven design are
+recorded in the [Absolute-Time Core Amendment](./todo/absoluteTimeCoreAmendment.md).

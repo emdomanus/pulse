@@ -7,39 +7,28 @@ type DirectionToken = {
 	name: "forward" | "backward",
 }
 
-type ProviderMapping = {
-	effectiveRate: number,
-	revision: number,
-}
-
 type ProviderSample = {
 	timePosition: number,
 	rate: number,
 	revision: number,
-	dataRevision: number,
 	epoch: number,
 }
 
 type ProviderChange = {
 	kind: string,
-	previous: ProviderMapping?,
-	current: ProviderMapping,
 	previousTimePosition: number?,
 	currentTimePosition: number,
 	discontinuous: boolean,
+	revision: number,
 }
 
 type Provider = {
 	read: (self: Provider) -> ProviderSample,
-	bindToChanged: (
-		self: Provider,
-		callback: (change: ProviderChange) -> (),
-		runInitially: boolean?
-	) -> Pulse.Release,
+	bindToChanged: (self: Provider, callback: (change: ProviderChange) -> (), runInitially: boolean?) -> Pulse.Release,
 	isDestroyed: (self: Provider) -> boolean,
 	bindToReached: (
 		self: Provider,
-		timePosition: number,
+		position: number,
 		direction: DirectionToken,
 		callback: (now: number, direction: DirectionToken) -> (),
 		phase: Phase
@@ -54,15 +43,9 @@ type InvocationContext = {
 	worldPosition: Vector3,
 }
 
-local function provePublicContract(
-	provider: Provider,
-	directions: Pulse.DirectionTokens<DirectionToken>
-): Pulse.Completion?
-	local structuralProvider: Pulse.ProviderClock<Phase, DirectionToken> = provider
-	local adapter = Pulse.temporalAdapter(structuralProvider, "presentation", directions)
+local function proveCoreContract(): Pulse.Completion?
 	local definition: Pulse.SequenceDefinition<InvocationContext> = {
 		duration = 2,
-		addressPolicy = "rebuild",
 		events = {
 			{
 				time = 1,
@@ -72,24 +55,18 @@ local function provePublicContract(
 				end,
 				reverse = function(playback: Pulse.PlaybackControl, context: InvocationContext)
 					local _worldPosition: Vector3 = context.worldPosition
-					local address: Pulse.SequenceAddress = { timePosition = 0 }
-					playback:seek(address)
+					playback:seek({ timePosition = 0 }, "skip")
 				end,
 			},
 		},
-		updates = {
+		samples = {
 			{
 				startTime = 0,
 				endTime = 2,
-				run = function(
-					playback: Pulse.PlaybackControl,
-					clockDt: number,
-					timePosition: number,
-					context: InvocationContext
-				)
+				run = function(playback: Pulse.PlaybackControl, sample: Pulse.SampleInfo, context: InvocationContext)
 					local _status: Pulse.Status = playback:getStatus()
-					local _delta: number = clockDt
-					local _position: number = timePosition
+					local _rate: number = sample.rate
+					local _position: Pulse.PlaybackPosition = sample.position
 					local _actorId: number = context.actorId
 				end,
 			},
@@ -103,7 +80,7 @@ local function provePublicContract(
 		end,
 	}
 	local sequence = Pulse.sequence(definition)
-	local playback: Pulse.Playback = Pulse.playback(sequence, adapter, {
+	local playback: Pulse.Playback = Pulse.playback(sequence, {
 		actorId = 42,
 		worldPosition = Vector3.zero,
 	}, {
@@ -111,20 +88,35 @@ local function provePublicContract(
 		position = { timePosition = 0 },
 		initialMode = "reconstruct",
 	})
-	local releaseEnded: Pulse.Release = playback:onEnded(function(completion)
-		local _terminal: Pulse.TerminalStatus = completion.status
-	end)
-	local releaseLooped: Pulse.Release = playback:onLooped(function(change)
-		local _direction: Pulse.TraversalDirection = change.direction
-	end)
-	playback:play():pause()
+	local initial: Pulse.TimeSample = { position = 100, rate = 1 }
+	playback:play(initial)
+	playback:evaluate({ position = 100.5, rate = 1 })
+	playback:pause()
 	playback:resume()
+	playback:evaluate({ position = 200, rate = 1 })
 	playback:setPlaybackSpeed(2)
+	playback:seek({ timePosition = 0.25 }, "reconstruct")
 	playback:cancel("fixture")
-	releaseLooped()
-	releaseEnded()
-	adapter:destroy()
 	return playback:getCompletion()
+end
+
+local function proveDriverContract(
+	provider: Provider,
+	directions: Pulse.DirectionTokens<DirectionToken>
+): Pulse.DrivenPlayback
+	local structuralProvider: Pulse.ProviderClock<Phase, DirectionToken> = provider
+	local driver: Pulse.ClockDriver = Pulse.clockDriver(structuralProvider, "presentation", directions)
+	local sequence: Pulse.Sequence<nil> = Pulse.sequence({ duration = 1 })
+	local playback = Pulse.playback(sequence, nil)
+	local driven = driver:attach(playback, {
+		discontinuityMode = "skip",
+	})
+	driven:play()
+	driven:setPlaybackSpeed(0.5)
+	driven:seek({ timePosition = 0.25 }, "reconstruct")
+	driven:pause()
+	driven:resume()
+	return driven
 end
 
 local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
@@ -132,13 +124,12 @@ local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
 	return builder
 		:duration(1)
 		:loop()
-		:addressPolicy("skip")
 		:event({
 			time = 0.5,
 			run = function(_playback, _context) end,
 		})
-		:update({
-			run = function(_playback, _dt, _timePosition, _context) end,
+		:sample({
+			run = function(_playback, _sample, _context) end,
 		})
 		:onPlay(function(_playback, _context) end)
 		:onAddress(function(_playback, _info, _context) end)
@@ -147,6 +138,7 @@ local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
 end
 
 return {
-	provePublicContract = provePublicContract,
+	proveCoreContract = proveCoreContract,
+	proveDriverContract = proveDriverContract,
 	proveBuilderContract = proveBuilderContract,
 }

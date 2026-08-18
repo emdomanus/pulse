@@ -4,7 +4,7 @@
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public shared types</span>
-  <span class="api-badge">Frozen value records</span>
+  <span class="api-badge">Frozen callback records</span>
 </div>
 
 <a id="release"></a>
@@ -14,7 +14,7 @@
 type Release = () -> ()
 ```
 
-An idempotent observer or binding release callback.
+An idempotent observer or provider-binding release callback.
 
 <a id="traversal-direction"></a>
 ## TraversalDirection
@@ -23,23 +23,8 @@ An idempotent observer or binding release callback.
 type TraversalDirection = "forward" | "backward"
 ```
 
-The actual direction through sequence coordinates after provider displacement and local playback
-speed are combined.
-
-<a id="address-policy"></a>
-## AddressPolicy
-
-```luau
-type AddressPolicy = "skip" | "rebuild" | "cancel"
-```
-
-| Value | Manual seek or discontinuous clock change |
-| --- | --- |
-| `skip` | Adopt the target without replaying authored events or replacing cleanup |
-| `rebuild` | Dispose the generation, rerun setup, and reconstruct forward to the target |
-| `cancel` | Complete as cancelled rather than adopting the target |
-
-Normal continuous traversal and clock-rate changes do not use this policy.
+Direction through sequence coordinates after source displacement and local playback speed are
+combined.
 
 <a id="address-mode"></a>
 ## AddressMode
@@ -48,18 +33,38 @@ Normal continuous traversal and clock-rate changes do not use this policy.
 type AddressMode = "reconstruct" | "skip"
 ```
 
-The behavior actually used to establish a non-natural playback position. `reconstruct` replays
-authored events forward from local zero; `skip` changes the cursor without executing historical
-events.
+| Value | Explicit address behavior |
+| --- | --- |
+| `reconstruct` | Replace/open the cleanup generation and replay canonical forward history to the target |
+| `skip` | Place the cursor without historical event traversal or generation replacement |
+
+Cancellation is the separate `Playback:cancel` lifecycle operation. An address mode is selected by
+each initial placement or seek, never stored in a Sequence.
 
 <a id="address-cause"></a>
 ## AddressCause
 
 ```luau
-type AddressCause = "initial" | "seek" | "clockDiscontinuity"
+type AddressCause = "initial" | "seek"
 ```
 
-Identifies why Pulse established a playback position without normal traversal.
+Why the raw core established a position without natural traversal. Provider-specific causes do not
+enter this type.
+
+<a id="time-sample"></a>
+## TimeSample
+
+```luau
+type TimeSample = {
+	position: number,
+	rate: number,
+}
+```
+
+Both fields must be finite. `position` is the absolute source coordinate. `rate` atomically
+describes the source rate at that coordinate; it selects future direction and feeds sampled
+metadata. Pulse never multiplies position displacement by rate. The record contains no revision,
+epoch, boundary, discontinuity, prediction, network, or authority metadata.
 
 <a id="sequence-address"></a>
 ## SequenceAddress
@@ -71,12 +76,11 @@ type SequenceAddress = {
 }
 ```
 
-An authored local address. `timePosition` must lie within the inclusive sequence duration.
-`loopIndex` defaults to zero, must be an exactly representable integer, and must be zero for a
-non-looping Sequence.
+`timePosition` must be finite and inside the inclusive sequence duration. `loopIndex` defaults to
+zero, must be an exactly representable integer, and must be zero for a non-looping Sequence.
 
 At a loop join, `{ timePosition = duration, loopIndex = n }` and `{ timePosition = 0, loopIndex = n
-+ 1 }` are distinct addresses with the same unwrapped coordinate.
++ 1 }` are distinct exact addresses with the same unwrapped coordinate.
 
 <a id="playback-position"></a>
 ## PlaybackPosition
@@ -91,11 +95,25 @@ type PlaybackPosition = {
 
 | Field | Description |
 | --- | --- |
-| `timePosition` | Authored local position within the current loop identity |
-| `loopIndex` | Signed logical cycle identity; always zero when non-looping |
-| `unwrappedTimePosition` | Unwrapped sequence coordinate used by traversal and anchors |
+| `timePosition` | Local authored position in the current loop identity |
+| `loopIndex` | Signed logical cycle identity; zero for a non-looping Sequence |
+| `unwrappedTimePosition` | Absolute sequence coordinate used by anchors and traversal |
 
-Playback returns a fresh record so callers cannot mutate internal cursor state.
+Public reads return new records; callback records freeze nested positions.
+
+<a id="sample-info"></a>
+## SampleInfo
+
+```luau
+type SampleInfo = {
+	position: PlaybackPosition,
+	rate: number,
+}
+```
+
+The immutable record passed to an active `Sample.run`. `position` is the final absolute Playback
+position for this evaluation. `rate` is `TimeSample.rate * playbackSpeed`, so it is signed and may
+be zero. There is intentionally no delta field.
 
 <a id="address-info"></a>
 ## AddressInfo
@@ -109,10 +127,9 @@ type AddressInfo = {
 }
 ```
 
-An immutable address report delivered to `SequenceDefinition.onAddress`. `from` is `nil` for the
-initial placement. For a seek it is the reconciled pre-seek cursor; for a clock discontinuity it is
-the cursor after Pulse catches up to the provider's pre-change position. `target` preserves exact
-loop and authored-boundary identity. The nested position records are immutable as well.
+An immutable report delivered to `SequenceDefinition.onAddress`. `from` is `nil` for initial
+placement and is the accepted pre-seek cursor for a later explicit seek. `target` preserves loop
+and authored-boundary identity.
 
 <a id="loop-change"></a>
 ## LoopChange
@@ -141,7 +158,7 @@ type ActiveStatus = "idle" | "playing" | "paused"
 type TerminalStatus = "completed" | "cancelled" | "destroyed" | "failed"
 ```
 
-`completed` is natural non-looping boundary completion. `cancelled` is policy or host cancellation.
+`completed` is natural non-looping boundary completion. `cancelled` is a host lifecycle decision.
 `destroyed` is explicit Playback destruction. `failed` represents callback, cleanup, provider,
 safety-limit, or numeric failure.
 
@@ -162,5 +179,5 @@ type Completion = {
 }
 ```
 
-The single frozen terminal result retained by Playback. The reason may be authored for cancellation
-or implementation-provided for a deterministic failure.
+The single frozen terminal result retained by Playback. The reason may be supplied by a host
+cancellation or by a deterministic core/driver failure.

@@ -1,6 +1,6 @@
 name = "emdomanus/pulse"
 version = "0.3.0"
-description = "A small generic sequence playback runtime for Roblox."
+description = "An externally evaluable absolute-time sequence runtime for Roblox."
 license = "MIT"
 authors = ["emdomanus"]
 repository = "https://github.com/emdomanus/pulse"

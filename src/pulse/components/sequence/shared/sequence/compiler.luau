@@ -2,16 +2,14 @@
 --!optimize 2
 --!native
 
-local DefTypes = require(script.Parent.Parent.Parent.Parent.Parent.types.def)
 local Types = require(script.Parent.Parent.Parent.Parent.Parent.types.components.sequence)
 
-type AddressPolicy = DefTypes.AddressPolicy
 type CompiledEvent<ContextT> = Types.CompiledEvent<ContextT>
-type CompiledUpdate<ContextT> = Types.CompiledUpdate<ContextT>
+type CompiledSample<ContextT> = Types.CompiledSample<ContextT>
 type Event<ContextT> = Types.Event<ContextT>
+type Sample<ContextT> = Types.Sample<ContextT>
 type SequenceDefinition<ContextT> = Types.SequenceDefinition<ContextT>
 type SequenceState<ContextT> = Types.SequenceState<ContextT>
-type Update<ContextT> = Types.Update<ContextT>
 
 type CompilerModule = {
 	compile: <ContextT>(definition: SequenceDefinition<ContextT>) -> SequenceState<ContextT>,
@@ -51,15 +49,6 @@ local function eventLess<ContextT>(left: CompiledEvent<ContextT>, right: Compile
 	return left.time < right.time
 end
 
-local function validatePolicy(policy: AddressPolicy?): AddressPolicy
-	local resolved: AddressPolicy = if policy == nil then "skip" :: AddressPolicy else policy
-	assert(
-		resolved == "skip" or resolved == "rebuild" or resolved == "cancel",
-		"Pulse addressPolicy must be 'skip', 'rebuild', or 'cancel'"
-	)
-	return resolved
-end
-
 local function compileEvents<ContextT>(definition: SequenceDefinition<ContextT>): { CompiledEvent<ContextT> }
 	local source: { Event<ContextT> } = definition.events or {}
 	assertDenseArray(source, "events")
@@ -87,43 +76,43 @@ local function compileEvents<ContextT>(definition: SequenceDefinition<ContextT>)
 	return table.freeze(events)
 end
 
-local function compileUpdates<ContextT>(definition: SequenceDefinition<ContextT>): { CompiledUpdate<ContextT> }
-	local source: { Update<ContextT> } = definition.updates or {}
-	assertDenseArray(source, "updates")
-	local updates: { CompiledUpdate<ContextT> } = table.create(#source)
-	for authorIndex, update in source do
-		local startTime = update.startTime or 0
-		local endTime = if update.endTime == nil then definition.duration else update.endTime
-		assertFinite(startTime, `update #{authorIndex} startTime`)
-		assertFinite(endTime, `update #{authorIndex} endTime`)
+local function compileSamples<ContextT>(definition: SequenceDefinition<ContextT>): { CompiledSample<ContextT> }
+	local source: { Sample<ContextT> } = definition.samples or {}
+	assertDenseArray(source, "samples")
+	local samples: { CompiledSample<ContextT> } = table.create(#source)
+	for authorIndex, sample in source do
+		local startTime = sample.startTime or 0
+		local endTime = if sample.endTime == nil then definition.duration else sample.endTime
+		assertFinite(startTime, `sample #{authorIndex} startTime`)
+		assertFinite(endTime, `sample #{authorIndex} endTime`)
 		assert(
 			startTime >= 0 and startTime < endTime and endTime <= definition.duration,
-			`Pulse update #{authorIndex} interval must satisfy 0 <= startTime < endTime <= duration`
+			`Pulse sample #{authorIndex} interval must satisfy 0 <= startTime < endTime <= duration`
 		)
-		assert(type(update.run) == "function", `Pulse update #{authorIndex} run must be a callback`)
-		local compiled: CompiledUpdate<ContextT> = table.freeze({
+		assert(type(sample.run) == "function", `Pulse sample #{authorIndex} run must be a callback`)
+		local compiled: CompiledSample<ContextT> = table.freeze({
 			startTime = startTime,
 			endTime = endTime,
 			authorIndex = authorIndex,
-			run = update.run,
+			run = sample.run,
 		})
-		table.insert(updates, compiled)
+		table.insert(samples, compiled)
 	end
-	return table.freeze(updates)
+	return table.freeze(samples)
 end
 
 local function compileBoundaries<ContextT>(
 	duration: number,
 	events: { CompiledEvent<ContextT> },
-	updates: { CompiledUpdate<ContextT> }
+	samples: { CompiledSample<ContextT> }
 ): { number }
 	local candidates: { number } = { 0, duration }
 	for _, event in events do
 		table.insert(candidates, event.time)
 	end
-	for _, update in updates do
-		table.insert(candidates, update.startTime)
-		table.insert(candidates, update.endTime)
+	for _, sample in samples do
+		table.insert(candidates, sample.startTime)
+		table.insert(candidates, sample.endTime)
 	end
 	table.sort(candidates)
 
@@ -148,16 +137,15 @@ local function compileDefinition<ContextT>(definition: SequenceDefinition<Contex
 	assert(definition.onLoop == nil or type(definition.onLoop) == "function", "Pulse onLoop must be a callback")
 
 	local events = compileEvents(definition)
-	local updates = compileUpdates(definition)
+	local samples = compileSamples(definition)
 	local contextType: (ContextT) -> ContextT = preserveContextType
 	return {
 		_contextType = contextType,
 		_duration = definition.duration,
 		_loop = definition.loop == true,
-		_addressPolicy = validatePolicy(definition.addressPolicy),
 		_events = events,
-		_updates = updates,
-		_boundaries = compileBoundaries(definition.duration, events, updates),
+		_samples = samples,
+		_boundaries = compileBoundaries(definition.duration, events, samples),
 		_onPlay = definition.onPlay,
 		_onAddress = definition.onAddress,
 		_onLoop = definition.onLoop,

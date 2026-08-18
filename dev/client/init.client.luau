@@ -12,10 +12,11 @@ local HarnessUi = require(script.harnessUi)
 local packages = ReplicatedStorage:WaitForChild("packages")
 local Pulse = require(packages:WaitForChild("pulse"))
 
-type AddressPolicy = Pulse.AddressPolicy
-type Playback = Pulse.Playback
-type PlaybackContext = Pulse.PlaybackContext
-type Sequence = Pulse.Sequence
+type AddressMode = Pulse.AddressMode
+type DriverDiscontinuityMode = Pulse.DriverDiscontinuityMode
+type Playback = Pulse.DrivenPlayback
+type PlaybackControl = Pulse.PlaybackControl
+type Sequence = Pulse.Sequence<nil>
 type StageController = AtomStage.Controller
 type ScenarioKey = HarnessUi.ScenarioKey
 type UiController = HarnessUi.Controller
@@ -23,7 +24,8 @@ type UiController = HarnessUi.Controller
 type Scenario = {
 	key: ScenarioKey,
 	label: string,
-	policy: AddressPolicy,
+	addressMode: AddressMode,
+	discontinuityMode: DriverDiscontinuityMode,
 	looping: boolean,
 	sequence: Sequence,
 }
@@ -33,13 +35,13 @@ type EventDirection = AtomStage.EventDirection
 local player = Players.LocalPlayer
 local clock = LiveClock.new()
 local phase: LiveClock.Phase = "heartbeat"
-local adapter = Pulse.temporalAdapter(clock, phase, clock.directions)
+local driver = Pulse.clockDriver(clock, phase, clock.directions)
 
 local activePlayback: Playback? = nil
 local activeScenario: Scenario? = nil
 local configuredSpeed = 1
 local eventCount = 0
-local updateCount = 0
+local sampleCount = 0
 local lastEvent = "waiting for playback"
 local lastEventDirection: EventDirection = "neutral"
 local logLines: { string } = {}
@@ -73,12 +75,12 @@ local function runEvent(label: string, marker: string, direction: EventDirection
 	record(`{arrow} {label} / {marker}`, direction)
 end
 
-local function createScenarioSequence(label: string, policy: AddressPolicy, looping: boolean): Sequence
-	return Pulse.builder()
+local function createScenarioSequence(label: string, looping: boolean): Sequence
+	local builder: Pulse.Builder<nil> = Pulse.builder()
+	return builder
 		:duration(6)
 		:loop(looping)
-		:addressPolicy(policy)
-		:onPlay(function(playback: PlaybackContext)
+		:onPlay(function(playback: PlaybackControl)
 			record(`{label}: generation began`, "neutral")
 			playback:addCleanup(function()
 				record(`{label}: generation cleanup`, "neutral")
@@ -111,14 +113,14 @@ local function createScenarioSequence(label: string, policy: AddressPolicy, loop
 				runEvent(label, "undo release @ 4.6", "reverse")
 			end,
 		})
-		:update({
+		:sample({
 			startTime = 0,
 			endTime = 6,
-			run = function(_playback: PlaybackContext, _timelineDt: number, _timePosition: number)
-				updateCount += 1
+			run = function(_playback: PlaybackControl, _sample: Pulse.SampleInfo)
+				sampleCount += 1
 			end,
 		})
-		:onLoop(function(_playback: PlaybackContext, change: Pulse.LoopChange)
+		:onLoop(function(_playback: PlaybackControl, change: Pulse.LoopChange)
 			local direction: EventDirection = if change.direction == "forward" then "forward" else "reverse"
 			record(`{label}: loop {change.fromLoopIndex} → {change.toLoopIndex} ({change.direction})`, direction)
 		end)
@@ -126,33 +128,37 @@ local function createScenarioSequence(label: string, policy: AddressPolicy, loop
 end
 
 local scenarios: { [ScenarioKey]: Scenario } = {
-	rebuild = {
-		key = "rebuild",
-		label = "Rebuild",
-		policy = "rebuild",
+	reconstruct = {
+		key = "reconstruct",
+		label = "Reconstruct",
+		addressMode = "reconstruct",
+		discontinuityMode = "reconstruct",
 		looping = false,
-		sequence = createScenarioSequence("Rebuild", "rebuild", false),
+		sequence = createScenarioSequence("Reconstruct", false),
 	},
 	skip = {
 		key = "skip",
 		label = "Skip",
-		policy = "skip",
+		addressMode = "skip",
+		discontinuityMode = "skip",
 		looping = false,
-		sequence = createScenarioSequence("Skip", "skip", false),
+		sequence = createScenarioSequence("Skip", false),
 	},
 	cancel = {
 		key = "cancel",
 		label = "Cancel",
-		policy = "cancel",
+		addressMode = "skip",
+		discontinuityMode = "cancel",
 		looping = false,
-		sequence = createScenarioSequence("Cancel", "cancel", false),
+		sequence = createScenarioSequence("Cancel", false),
 	},
 	loop = {
 		key = "loop",
 		label = "Loop",
-		policy = "rebuild",
+		addressMode = "reconstruct",
+		discontinuityMode = "reconstruct",
 		looping = true,
-		sequence = createScenarioSequence("Loop", "rebuild", true),
+		sequence = createScenarioSequence("Loop", true),
 	},
 }
 
@@ -169,15 +175,19 @@ local function startScenario(key: ScenarioKey)
 	local scenario = scenarios[key]
 	activeScenario = scenario
 	eventCount = 0
-	updateCount = 0
+	sampleCount = 0
 	lastEvent = `${scenario.label} ready`
 	lastEventDirection = "neutral"
 	local initialPosition = if configuredSpeed < 0 and not scenario.looping then scenario.sequence:getDuration() else 0
-	local playback = Pulse.playback(scenario.sequence, adapter, {
+	local rawPlayback = Pulse.playback(scenario.sequence, nil, {
 		playbackSpeed = configuredSpeed,
 		position = {
 			timePosition = initialPosition,
 		},
+		initialMode = scenario.addressMode,
+	})
+	local playback = driver:attach(rawPlayback, {
+		discontinuityMode = scenario.discontinuityMode,
 	})
 	activePlayback = playback
 	playback:onLooped(function(change)
@@ -190,12 +200,12 @@ local function startScenario(key: ScenarioKey)
 		record(`completion: {completion.status} / {completion.reason or "no reason"}`, "neutral")
 	end)
 	playback:play()
-	record(`started {scenario.label} policy at {string.format("%+.2f", configuredSpeed)}×`, "neutral")
+	record(`started {scenario.label} mode at {string.format("%+.2f", configuredSpeed)}×`, "neutral")
 end
 
 local function restart()
 	local scenario = activeScenario
-	startScenario(if scenario == nil then "rebuild" else scenario.key)
+	startScenario(if scenario == nil then "reconstruct" else scenario.key)
 end
 
 local function togglePause()
@@ -249,7 +259,7 @@ local function seekTo(timePosition: number, loopOffset: number?)
 	if scenario.looping then
 		address.loopIndex = current.loopIndex + (loopOffset or 0)
 	end
-	local accepted = playback:seek(address)
+	local accepted = playback:seek(address, scenario.addressMode)
 	record(
 		string.format(
 			"seek %s to %.2f%s",
@@ -299,8 +309,8 @@ local function cancelActive()
 end
 
 local callbacks: HarnessUi.Callbacks = {
-	selectRebuild = function()
-		startScenario("rebuild")
+	selectReconstruct = function()
+		startScenario("reconstruct")
 	end,
 	selectSkip = function()
 		startScenario("skip")
@@ -373,7 +383,7 @@ local renderConnection = RunService.RenderStepped:Connect(function(deltaTime)
 	controller:update({
 		scenarioKey = scenario.key,
 		scenarioLabel = scenario.label,
-		policy = scenario.policy,
+		mode = scenario.discontinuityMode,
 		status = playback:getStatus(),
 		position = position.timePosition,
 		duration = scenario.sequence:getDuration(),
@@ -384,7 +394,7 @@ local renderConnection = RunService.RenderStepped:Connect(function(deltaTime)
 		changedBindings = diagnostics.changedBindings,
 		phaseBindings = diagnostics.phaseBindings,
 		eventCount = eventCount,
-		updateCount = updateCount,
+		sampleCount = sampleCount,
 		lastEvent = lastEvent,
 		lastEventDirection = lastEventDirection,
 	})
@@ -396,7 +406,7 @@ local inputConnection = UserInputService.InputBegan:Connect(function(input, game
 	end
 	local keyCode = input.KeyCode
 	if keyCode == Enum.KeyCode.One then
-		startScenario("rebuild")
+		startScenario("reconstruct")
 	elseif keyCode == Enum.KeyCode.Two then
 		startScenario("skip")
 	elseif keyCode == Enum.KeyCode.Three then
@@ -431,7 +441,7 @@ local function cleanup()
 	if playback ~= nil and playback:isAlive() then
 		playback:destroy()
 	end
-	adapter:destroy()
+	driver:destroy()
 	clock:destroy()
 	controller:destroy()
 	stageController:destroy()
@@ -441,5 +451,5 @@ end
 
 script.Destroying:Connect(cleanup)
 
-startScenario("rebuild")
+startScenario("reconstruct")
 record("ready: traverse events, seek, jump the provider, loop, reverse, and cancel", "neutral")
