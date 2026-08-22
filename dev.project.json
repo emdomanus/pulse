@@ -6,9 +6,6 @@
       "$className": "ReplicatedStorage",
       "packages": {
         "$className": "Folder",
-        "roblox_packages": {
-          "$path": "roblox_packages"
-        },
         "pulse": {
           "$path": "src"
         }
