@@ -1,22 +1,26 @@
 --!strict
 --!optimize 2
---!native
 
-local DefTypes = require(script.Parent.Parent.def)
-local SequenceTypes = require(script.Parent.sequence)
+local PlaybackDriverTypes = require(script.Parent.Parent.Parent.Parent.ports.components.playback.shared.playbackDriver)
+local PlaybackControlTypes =
+	require(script.Parent.Parent.Parent.Parent.ports.components.playback.shared.playbackControl)
+local PlaybackDefinitions = require(script.Parent.Parent.Parent.Parent.def.playback.shared.playbackDefinitions)
+local SequenceTypes = require(script.Parent.Parent.Parent.sequence.shared.sequence)
+local PlaybackVocabulary = require(script.Parent.Parent.Parent.Parent.Parent.common.playback.shared.playbackVocabulary)
 
-type AddressMode = DefTypes.AddressMode
-type Completion = DefTypes.Completion
-type LoopChange = DefTypes.LoopChange
-type PlaybackControl = DefTypes.PlaybackControl
-type PlaybackPosition = DefTypes.PlaybackPosition
-type Release = DefTypes.Release
-type SequenceAddress = DefTypes.SequenceAddress
+type AddressMode = PlaybackVocabulary.AddressMode
+type Completion = PlaybackDefinitions.Completion
+type LoopChange = PlaybackDefinitions.LoopChange
+type PlaybackControl = PlaybackControlTypes.PlaybackControl
+type PlaybackDriver = PlaybackDriverTypes.PlaybackDriver
+type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
+type Release = PlaybackDefinitions.Release
+type SequenceAddress = PlaybackDefinitions.SequenceAddress
 type StoredSequence = SequenceTypes.StoredSequence
-type Status = DefTypes.Status
-type TerminalStatus = DefTypes.TerminalStatus
-type TimeSample = DefTypes.TimeSample
-type TraversalDirection = DefTypes.TraversalDirection
+type Status = PlaybackVocabulary.Status
+type TerminalStatus = PlaybackVocabulary.TerminalStatus
+type TimeSample = PlaybackDefinitions.TimeSample
+type TraversalDirection = PlaybackVocabulary.TraversalDirection
 
 export type EndedCallback = (completion: Completion) -> ()
 export type EndedBinding = {
@@ -38,7 +42,8 @@ export type PlaybackOptions = {
 
 export type EvaluateOperation = {
 	kind: "evaluate",
-	sample: TimeSample,
+	position: number,
+	rate: number,
 }
 
 export type PauseOperation = {
@@ -56,7 +61,7 @@ export type SpeedOperation = {
 
 export type SeekOperation = {
 	kind: "seek",
-	address: SequenceAddress,
+	target: PlaybackPosition,
 	mode: AddressMode,
 }
 
@@ -69,12 +74,6 @@ export type TerminalRequest = {
 
 export type BoundaryState = "before" | "after" | "forwardJoinPending" | "backwardJoinPending"
 
-export type TraversalForecast = {
-	phaseRequired: boolean,
-	sourceBoundary: number?,
-	sourceDirection: TraversalDirection?,
-}
-
 export type Playback = PlaybackControl & {
 	play: (self: Playback, sample: TimeSample) -> Playback,
 	evaluate: (self: Playback, sample: TimeSample) -> boolean,
@@ -84,7 +83,9 @@ export type Playback = PlaybackControl & {
 	getCompletion: (self: Playback) -> Completion?,
 }
 
-export type PlaybackImpl = Playback & {
+export type PlaybackDriven = Playback & PlaybackDriver
+
+export type PlaybackImpl = PlaybackDriven & {
 	_sequence: StoredSequence,
 	_context: unknown,
 	_status: Status,
@@ -92,9 +93,11 @@ export type PlaybackImpl = Playback & {
 	_playbackSpeed: number,
 	_anchorSource: number,
 	_anchorSequence: number,
-	_acceptedSample: TimeSample?,
+	_acceptedSourcePosition: number?,
+	_acceptedSourceRate: number?,
 	_resumePending: boolean,
 	_position: PlaybackPosition,
+	_forecastBoundary: PlaybackPosition,
 	_initialPosition: PlaybackPosition,
 	_initialMode: AddressMode,
 	_boundaryState: BoundaryState?,

@@ -94,7 +94,7 @@ type Playback = {
 	getStatus: (self: Playback) -> string,
 	addCleanup: (self: Playback, cleanup: () -> ()) -> (),
 	cancel: (self: Playback, reason: string?) -> (),
-	destroy: (self: Playback) -> (),
+	deconstruct: (self: Playback) -> (),
 	onEnded: (self: Playback, callback: (completion: Completion) -> ()) -> () -> (),
 	onLooped: (self: Playback, callback: (change: unknown) -> ()) -> () -> (),
 	isAlive: (self: Playback) -> boolean,
@@ -109,10 +109,11 @@ type DrivenPlayback = {
 	getPlaybackSpeed: (self: DrivenPlayback) -> number,
 	seek: (self: DrivenPlayback, address: { timePosition: number, loopIndex: number? }, mode: AddressMode) -> boolean,
 	getPosition: (self: DrivenPlayback) -> PlaybackPosition,
+	writePositionInto: (self: DrivenPlayback, output: PlaybackPosition) -> (),
 	getStatus: (self: DrivenPlayback) -> string,
 	addCleanup: (self: DrivenPlayback, cleanup: () -> ()) -> (),
 	cancel: (self: DrivenPlayback, reason: string?) -> (),
-	destroy: (self: DrivenPlayback) -> (),
+	deconstruct: (self: DrivenPlayback) -> (),
 	onEnded: (self: DrivenPlayback, callback: (completion: Completion) -> ()) -> () -> (),
 	onLooped: (self: DrivenPlayback, callback: (change: unknown) -> ()) -> () -> (),
 	isAlive: (self: DrivenPlayback) -> boolean,
@@ -126,7 +127,7 @@ type ClockDriver = {
 		playback: Playback,
 		options: { discontinuityMode: "skip" | "reconstruct" | "cancel" }
 	) -> DrivenPlayback,
-	destroy: (self: ClockDriver) -> (),
+	deconstruct: (self: ClockDriver) -> (),
 	isDestroyed: (self: ClockDriver) -> boolean,
 }
 
@@ -216,6 +217,28 @@ local function stepPhaseTicks(clock: FakeClock, count: number)
 		clock:stepRootTo(tick / (count + 1), PHASE)
 	end
 end
+
+Harness.test("driven output buffers remain borrowed and deconstruct reconciles then retires", function()
+	local clock = FakeClock.new()
+	local driven, playback, driver = createDriven(clock, { duration = 10 }, "skip")
+	driven:play()
+	clock:advanceRootTo(2)
+	local reads = clock:getReadCount()
+	local output = { timePosition = -1, loopIndex = -1, unwrappedTimePosition = -1 }
+	driven:writePositionInto(output)
+	Harness.assertEqual(output.timePosition, 0)
+	Harness.assertEqual(clock:getReadCount(), reads)
+	output.timePosition = 999
+	driven:deconstruct()
+	Harness.assertEqual(playback:getStatus(), "destroyed")
+	Harness.assertEqual(playback:getPosition().timePosition, 2)
+	Harness.assertEqual(output.timePosition, 999)
+	Harness.assertEqual(clock:getTaskCount(), 0)
+	Harness.assertEqual(clock:getChangedBindingCount(), 0)
+	driven:deconstruct()
+	driver:deconstruct()
+	Harness.assertFalse(clock:isDestroyed())
+end)
 
 Harness.test("event-only driven playback owns one deadline and no phase binding", function()
 	local clock = FakeClock.new()
@@ -1304,8 +1327,8 @@ Harness.test("one raw playback has at most one clock driver attachment", functio
 	local second = secondDriver:attach(raw, { discontinuityMode = "skip" })
 	second:play()
 	second:cancel()
-	firstDriver:destroy()
-	secondDriver:destroy()
+	firstDriver:deconstruct()
+	secondDriver:deconstruct()
 	Harness.assertFalse(firstClock:isDestroyed())
 	Harness.assertFalse(secondClock:isDestroyed())
 end)
@@ -1335,7 +1358,7 @@ Harness.test("driver and provider teardown terminate attachments without destroy
 		},
 	}, "skip")
 	driven:play()
-	driver:destroy()
+	driver:deconstruct()
 	Harness.assertEqual((driven:getCompletion() :: Completion).status, "failed")
 	Harness.assertEqual((driven:getCompletion() :: Completion).reason, "driverDestroyed")
 	Harness.assertFalse(clock:isDestroyed())

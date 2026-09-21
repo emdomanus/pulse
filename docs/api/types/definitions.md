@@ -1,6 +1,6 @@
 # Types / Definitions
 
-<div class="api-path">src/pulse/types/def/init.luau</div>
+<div class="api-path">src/pulse/types/def/playback/shared/playbackDefinitions.luau</div>
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public shared types</span>
@@ -65,6 +65,10 @@ Both fields must be finite. `position` is the absolute source coordinate. `rate`
 describes the source rate at that coordinate; it selects future direction and feeds sampled
 metadata. Pulse never multiplies position displacement by rate. The record contains no revision,
 epoch, boundary, discontinuity, prediction, network, or authority metadata.
+
+The caller owns this table. Playback synchronously validates and snapshots its two scalar values,
+without retaining or cloning the table. It may be reused or mutated immediately after `play` or
+`evaluate` returns; queued reentrant evaluations retain independent scalar snapshots.
 
 <a id="sequence-address"></a>
 ## SequenceAddress

@@ -40,7 +40,7 @@ type ClockDriver = {
 		playback: Playback,
 		options: { discontinuityMode: "skip" | "reconstruct" | "cancel" }
 	) -> DrivenPlayback,
-	destroy: (self: ClockDriver) -> (),
+	deconstruct: (self: ClockDriver) -> (),
 }
 type PulseApi = {
 	sequence: (definition: { duration: number, events: { Event }?, samples: { Sample }? }) -> Sequence,
@@ -139,7 +139,7 @@ local function profileDriverFanout(attachmentCount: number, tickCount: number, p
 	)
 	assert(reads == tickCount, `expected {tickCount} shared phase reads, got {reads}`)
 	assert(reschedules == 0, `expected no unchanged-deadline reschedules, got {reschedules}`)
-	driver:destroy()
+	driver:deconstruct()
 	return elapsed, callbacks
 end
 

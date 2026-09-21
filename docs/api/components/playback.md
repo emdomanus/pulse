@@ -1,6 +1,6 @@
 # Components / Playback
 
-<div class="api-path">src/pulse/components/playback/shared/playback/init.luau</div>
+<div class="api-path">src/pulse/components/playback/shared/playback.luau</div>
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public raw core</span>
@@ -48,10 +48,11 @@ type PlaybackControl = {
 	getPlaybackSpeed: (self: PlaybackControl) -> number,
 	seek: (self: PlaybackControl, address: SequenceAddress, mode: AddressMode) -> boolean,
 	getPosition: (self: PlaybackControl) -> PlaybackPosition,
+	writePositionInto: (self: PlaybackControl, output: PlaybackPosition) -> (),
 	getStatus: (self: PlaybackControl) -> Status,
 	addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),
 	cancel: (self: PlaybackControl, reason: string?) -> (),
-	destroy: (self: PlaybackControl) -> (),
+	deconstruct: (self: PlaybackControl) -> (),
 }
 ```
 
@@ -103,7 +104,7 @@ type Playback = PlaybackControl & {
 | [`pause`](#playback-pause) | `() -> ()` | Pauses at the accepted coordinate |
 | [`resume`](#playback-resume) | `() -> ()` | Makes the next sample a no-catch-up re-anchor |
 | [`cancel`](#playback-cancel) | `(reason: string?) -> ()` | Completes as `cancelled` |
-| [`destroy`](#playback-destroy) | `() -> ()` | Completes as `destroyed` and retires observers |
+| [`deconstruct`](#playback-deconstruct) | `() -> ()` | Completes as `destroyed` and retires observers |
 | [`isAlive`](#playback-is-alive) | `() -> boolean` | Tests whether no terminal Completion exists |
 
 ### Timeline
@@ -114,6 +115,7 @@ type Playback = PlaybackControl & {
 | [`getPlaybackSpeed`](#playback-get-playback-speed) | `() -> number` | Reads the local multiplier |
 | [`seek`](#playback-seek) | `(SequenceAddress, AddressMode) -> boolean` | Explicitly skips or reconstructs |
 | [`getPosition`](#playback-get-position) | `() -> PlaybackPosition` | Reads a cloned accepted position |
+| [`writePositionInto`](#playback-write-position-into) | `(PlaybackPosition) -> ()` | Writes the accepted position into a reusable caller-owned buffer |
 | [`getStatus`](#playback-get-status) | `() -> Status` | Reads active or terminal state |
 
 ### Ownership and observation
@@ -150,8 +152,10 @@ construction.
 Playback:play(sample: TimeSample) -> Playback
 ```
 
-Copies and validates the first source sample, enters `playing`, and establishes the configured
-initial address. `reconstruct` opens the first generation and replays Events canonically forward
+Synchronously validates the first source sample and snapshots its `position` and `rate` scalars,
+enters `playing`, and establishes the configured initial address. Pulse neither retains nor clones
+the caller-owned table; the caller may reuse or mutate it immediately after the call returns.
+`reconstruct` opens the first generation and replays Events canonically forward
 from local zero of the selected loop; `skip` opens the generation and suppresses historical Events,
 including Events exactly at the target.
 
@@ -183,6 +187,12 @@ A multi-loop jump does not synthesize one Sample callback per crossed loop. Equa
 evaluation emits no discrete Event again but may Sample active state once. Returns `true` when a
 playing Playback accepted the evaluation for serialized processing; returns `false` otherwise.
 Invalid samples raise before the status check.
+
+Pulse synchronously validates and snapshots the two scalar values without retaining or cloning
+the caller-owned table. An ordinary synchronous evaluation processes these values directly;
+reentrant evaluations queue independent scalar snapshots in FIFO order with other controls.
+The caller may reuse or mutate the same table immediately after each call returns, including
+when an evaluation was queued from a callback.
 
 <a id="playback-pause"></a>
 ### Playback:pause
@@ -260,6 +270,18 @@ clock/wall time. Exact loop-join identities remain distinct even when their unwr
 equal. An explicit duration-side address remains on that side; a later forward evaluation performs
 the still-future loop hook and next-cycle zero work.
 
+<a id="playback-write-position-into"></a>
+### Playback:writePositionInto
+
+```luau
+Playback:writePositionInto(output: PlaybackPosition) -> ()
+```
+
+Writes all three accepted position fields into the supplied mutable buffer without allocating or
+retaining it. The caller may reuse the buffer across playbacks and mutate it after the call.
+Like `getPosition`, this reads accepted state without advancing playback or reading a clock.
+`PlaybackControl` and `DrivenPlayback` expose the same operation.
+
 <a id="playback-get-status"></a>
 ### Playback:getStatus
 
@@ -293,11 +315,11 @@ Playback:cancel(reason: string?) -> ()
 Requests terminal status `cancelled`, drains cleanup, and publishes Ended once. A terminal request
 made inside an authored callback interrupts remaining equal-time work after that callback returns.
 
-<a id="playback-destroy"></a>
-### Playback:destroy
+<a id="playback-deconstruct"></a>
+### Playback:deconstruct
 
 ```luau
-Playback:destroy() -> ()
+Playback:deconstruct() -> ()
 ```
 
 Requests terminal status `destroyed`. Calling it after completion clears retained observer

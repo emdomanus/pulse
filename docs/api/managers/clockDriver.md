@@ -118,7 +118,7 @@ type ClockDriver = {
 		playback: Playback,
 		options: ClockDriverAttachmentOptions
 	) -> DrivenPlayback,
-	destroy: (self: ClockDriver) -> (),
+	deconstruct: (self: ClockDriver) -> (),
 	isDestroyed: (self: ClockDriver) -> boolean,
 }
 ```
@@ -174,11 +174,11 @@ can stale the driver's scheduling state. A raw Playback may have at most one dri
 time, and attaching to a destroyed driver raises. Attachment itself does not start the lifecycle or
 subscribe; register observers and call `DrivenPlayback:play()`.
 
-<a id="clock-driver-destroy"></a>
-### ClockDriver:destroy
+<a id="clock-driver-deconstruct"></a>
+### ClockDriver:deconstruct
 
 ```luau
-ClockDriver:destroy() -> ()
+ClockDriver:deconstruct() -> ()
 ```
 
 Releases reached tasks, the shared phase binding, and the changed subscription. Each still-attached
@@ -206,10 +206,11 @@ type DrivenPlayback = {
 	getPlaybackSpeed: (self: DrivenPlayback) -> number,
 	seek: (self: DrivenPlayback, address: SequenceAddress, mode: AddressMode) -> boolean,
 	getPosition: (self: DrivenPlayback) -> PlaybackPosition,
+	writePositionInto: (self: DrivenPlayback, output: PlaybackPosition) -> (),
 	getStatus: (self: DrivenPlayback) -> Status,
 	addCleanup: (self: DrivenPlayback, cleanup: () -> ()) -> (),
 	cancel: (self: DrivenPlayback, reason: string?) -> (),
-	destroy: (self: DrivenPlayback) -> (),
+	deconstruct: (self: DrivenPlayback) -> (),
 	onEnded: (self: DrivenPlayback, callback: EndedCallback) -> Release,
 	onLooped: (self: DrivenPlayback, callback: LoopedCallback) -> Release,
 	isAlive: (self: DrivenPlayback) -> boolean,
@@ -226,10 +227,14 @@ perform host-side lifecycle and timeline mutations through this facade.
 ### Mutation reconciliation
 
 While playing, externally requested `pause`, `setPlaybackSpeed`, `seek`, `addCleanup`, `cancel`,
-`destroy`, and `detach` first read/evaluate the current provider sample, then mutate the core at
+`deconstruct`, and `detach` first read/evaluate the current provider sample, then mutate the core at
 that accepted coordinate. `resume` reads the current provider sample after setting the core's
 no-catch-up resume state, so the stored paused position is re-anchored there. Read-only methods
 return core state and do not introduce implicit evaluation.
+
+`writePositionInto(output)` writes the accepted cursor into a caller-owned mutable buffer without
+allocation or retention. Use it when repeatedly observing driven positions; `getPosition()` still
+returns a detached record.
 
 Methods called on `DrivenPlayback` enter the driver notification queue. A `PlaybackControl` passed
 to an authored Pulse callback is different: it remains valid for synchronous control inside that

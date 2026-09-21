@@ -1,13 +1,19 @@
 --!strict
 --!optimize 2
---!native
 
-local DefTypes = require(script.Parent.Parent.def)
+local PlaybackControlTypes =
+	require(script.Parent.Parent.Parent.Parent.ports.components.playback.shared.playbackControl)
+local PlaybackDefinitions = require(script.Parent.Parent.Parent.Parent.def.playback.shared.playbackDefinitions)
 
-type AddressInfo = DefTypes.AddressInfo
-type LoopChange = DefTypes.LoopChange
-type PlaybackControl = DefTypes.PlaybackControl
-type SampleInfo = DefTypes.SampleInfo
+local PlaybackVocabulary = require(script.Parent.Parent.Parent.Parent.Parent.common.playback.shared.playbackVocabulary)
+
+type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
+type SequenceAddress = PlaybackDefinitions.SequenceAddress
+type TraversalDirection = PlaybackVocabulary.TraversalDirection
+type AddressInfo = PlaybackDefinitions.AddressInfo
+type LoopChange = PlaybackDefinitions.LoopChange
+type PlaybackControl = PlaybackControlTypes.PlaybackControl
+type SampleInfo = PlaybackDefinitions.SampleInfo
 
 export type EventCallback<ContextT> = (playback: PlaybackControl, context: ContextT) -> ()
 export type AddressCallback<ContextT> = (playback: PlaybackControl, info: AddressInfo, context: ContextT) -> ()
@@ -77,33 +83,35 @@ export type SequenceState<ContextT> = {
 	_onLoop: LoopCallback<ContextT>?,
 }
 
-export type SequenceImpl<ContextT> = Sequence<ContextT> & SequenceState<ContextT>
-
-export type Builder<ContextT> = {
-	duration: (self: Builder<ContextT>, seconds: number) -> Builder<ContextT>,
-	loop: (self: Builder<ContextT>, enabled: boolean?) -> Builder<ContextT>,
-	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
-	sample: (self: Builder<ContextT>, sample: Sample<ContextT>) -> Builder<ContextT>,
-	onPlay: (self: Builder<ContextT>, callback: EventCallback<ContextT>) -> Builder<ContextT>,
-	onAddress: (self: Builder<ContextT>, callback: AddressCallback<ContextT>) -> Builder<ContextT>,
-	onLoop: (self: Builder<ContextT>, callback: LoopCallback<ContextT>) -> Builder<ContextT>,
-	compile: (self: Builder<ContextT>) -> Sequence<ContextT>,
+-- Complete compiled view retained by Playback; the package facade exposes only Sequence.
+export type SequenceStored<ContextT> = Sequence<ContextT> & {
+	validateAddress: (self: SequenceStored<ContextT>, address: SequenceAddress) -> PlaybackPosition,
+	positionAt: (self: SequenceStored<ContextT>, unwrappedTimePosition: number) -> PlaybackPosition,
+	nextBoundary: (
+		self: SequenceStored<ContextT>,
+		position: PlaybackPosition,
+		direction: TraversalDirection
+	) -> SequenceBoundary?,
+	nextBoundaryInto: (
+		self: SequenceStored<ContextT>,
+		position: PlaybackPosition,
+		direction: TraversalDirection,
+		output: SequenceBoundary
+	) -> boolean,
+	boundaryAt: (self: SequenceStored<ContextT>, position: PlaybackPosition) -> SequenceBoundary?,
+	eventRangeAt: (self: SequenceStored<ContextT>, localTimePosition: number) -> (number, number),
+	getEvent: (self: SequenceStored<ContextT>, index: number) -> CompiledEvent<ContextT>,
+	getSamples: (self: SequenceStored<ContextT>) -> { CompiledSample<ContextT> },
+	getOnPlay: (self: SequenceStored<ContextT>) -> EventCallback<ContextT>?,
+	getOnAddress: (self: SequenceStored<ContextT>) -> AddressCallback<ContextT>?,
+	getOnLoop: (self: SequenceStored<ContextT>) -> LoopCallback<ContextT>?,
 }
 
-export type BuilderImpl<ContextT> = Builder<ContextT> & {
-	_constructSequence: SequenceConstructor<ContextT>,
-	_duration: number?,
-	_loop: boolean,
-	_events: { Event<ContextT> },
-	_samples: { Sample<ContextT> },
-	_onPlay: EventCallback<ContextT>?,
-	_onAddress: AddressCallback<ContextT>?,
-	_onLoop: LoopCallback<ContextT>?,
-}
+export type SequenceImpl<ContextT> = SequenceStored<ContextT> & SequenceState<ContextT>
 
 export type StoredEvent = CompiledEvent<unknown>
 export type StoredSample = CompiledSample<unknown>
-export type StoredSequence = Sequence<unknown>
+export type StoredSequence = SequenceStored<unknown>
 export type StoredSequenceImpl = SequenceImpl<unknown>
 
 return {}

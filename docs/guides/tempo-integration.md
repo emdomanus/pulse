@@ -72,5 +72,5 @@ An authored callback's `PlaybackControl` is valid for synchronous callback contr
 operation queue. Do not retain and invoke it asynchronously while attached; later control goes
 through the driven facade so ClockDriver can reconcile and refresh scheduling.
 
-The Tempo Clock and runtime remain host-owned. `ClockDriver:destroy()` releases Pulse's changed
+The Tempo Clock and runtime remain host-owned. `ClockDriver:deconstruct()` releases Pulse's changed
 subscription, phase binding, reached tasks, and attachments but never destroys the clock.

@@ -76,7 +76,7 @@ local function runEvent(label: string, marker: string, direction: EventDirection
 end
 
 local function createScenarioSequence(label: string, looping: boolean): Sequence
-	local builder: Pulse.Builder<nil> = Pulse.builder()
+	local builder: Pulse.SequenceBuilder<nil> = Pulse.builder()
 	return builder
 		:duration(6)
 		:loop(looping)
@@ -169,7 +169,7 @@ end
 local function startScenario(key: ScenarioKey)
 	local previous = activePlayback
 	if previous ~= nil and previous:isAlive() then
-		previous:destroy()
+		previous:deconstruct()
 	end
 
 	local scenario = scenarios[key]
@@ -439,9 +439,9 @@ local function cleanup()
 	local playback = activePlayback
 	activePlayback = nil
 	if playback ~= nil and playback:isAlive() then
-		playback:destroy()
+		playback:deconstruct()
 	end
-	driver:destroy()
+	driver:deconstruct()
 	clock:destroy()
 	controller:destroy()
 	stageController:destroy()

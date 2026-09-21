@@ -88,6 +88,8 @@ local function proveCoreContract(): Pulse.Completion?
 		position = { timePosition = 0 },
 		initialMode = "reconstruct",
 	})
+	local output: Pulse.PlaybackPosition = { timePosition = 0, loopIndex = 0, unwrappedTimePosition = 0 }
+	playback:writePositionInto(output)
 	local initial: Pulse.TimeSample = { position = 100, rate = 1 }
 	playback:play(initial)
 	playback:evaluate({ position = 100.5, rate = 1 })
@@ -120,7 +122,7 @@ local function proveDriverContract(
 end
 
 local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
-	local builder: Pulse.Builder<InvocationContext> = Pulse.builder()
+	local builder: Pulse.SequenceBuilder<InvocationContext> = Pulse.builder()
 	return builder
 		:duration(1)
 		:loop()

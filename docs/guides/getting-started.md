@@ -12,7 +12,7 @@ type PresentationContext = {
 	camera: Camera,
 }
 
-local builder: Pulse.Builder<PresentationContext> = Pulse.builder()
+local builder: Pulse.SequenceBuilder<PresentationContext> = Pulse.builder()
 local sequence = builder
 	:duration(1.2)
 	:event({
@@ -163,7 +163,7 @@ end, or an outward zero-distance loop join awaits actual movement.
 ```luau
 releaseEnded()
 driven:cancel("superseded")
-driver:destroy()
+driver:deconstruct()
 ```
 
 Driver destruction fails attached live Playbacks but never destroys the borrowed provider. Call

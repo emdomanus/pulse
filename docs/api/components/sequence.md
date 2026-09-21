@@ -1,6 +1,6 @@
 # Components / Sequence
 
-<div class="api-path">src/pulse/components/sequence/shared/sequence/init.luau</div>
+<div class="api-path">src/pulse/components/sequence/shared/sequence.luau</div>
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public compiled template</span>

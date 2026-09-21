@@ -33,7 +33,7 @@ type ClockDriver = Pulse.ClockDriver
 - [Sample&lt;ContextT&gt;](../components/sequence.md#sample)
 - [SequenceDefinition&lt;ContextT&gt;](../components/sequence.md#sequence-definition)
 - [Sequence&lt;ContextT&gt;](../components/sequence.md#sequence)
-- [Builder&lt;ContextT&gt;](../components/builder.md#builder)
+- [SequenceBuilder&lt;ContextT&gt;](../components/builder.md#builder)
 
 ## Raw Playback
 

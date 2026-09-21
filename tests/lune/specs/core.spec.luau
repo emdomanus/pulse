@@ -44,6 +44,8 @@ type AddressInfo = {
 
 type Playback = {
 	play: (self: Playback, sample: TimeSample) -> Playback,
+	getAcceptedSample: (self: Playback) -> TimeSample?,
+	acceptSourceSample: (self: Playback, sample: TimeSample) -> (),
 	evaluate: (self: Playback, sample: TimeSample) -> boolean,
 	pause: (self: Playback) -> (),
 	resume: (self: Playback) -> (),
@@ -51,10 +53,19 @@ type Playback = {
 	getPlaybackSpeed: (self: Playback) -> number,
 	seek: (self: Playback, address: { timePosition: number, loopIndex: number? }, mode: AddressMode) -> boolean,
 	getPosition: (self: Playback) -> PlaybackPosition,
+	writePositionInto: (self: Playback, output: PlaybackPosition) -> (),
+	writeTraversalForecastInto: (
+		self: Playback,
+		output: {
+			phaseRequired: boolean,
+			sourceBoundary: number?,
+			sourceDirection: ("forward" | "backward")?,
+		}
+	) -> (),
 	getStatus: (self: Playback) -> string,
 	addCleanup: (self: Playback, cleanup: () -> ()) -> (),
 	cancel: (self: Playback, reason: string?) -> (),
-	destroy: (self: Playback) -> (),
+	deconstruct: (self: Playback) -> (),
 	onEnded: (self: Playback, callback: (completion: Completion) -> ()) -> () -> (),
 	onLooped: (
 		self: Playback,
@@ -157,6 +168,503 @@ local function timeSample(position: number, rate: number?): TimeSample
 		rate = rate or 1,
 	}
 end
+
+local function assertAccepted(playback: Playback, position: number, rate: number)
+	local fields = (playback :: unknown) :: { _acceptedSourcePosition: number?, _acceptedSourceRate: number? }
+	Harness.assertEqual(fields._acceptedSourcePosition, position)
+	Harness.assertEqual(fields._acceptedSourceRate, rate)
+	local accepted = playback:getAcceptedSample()
+	assert(accepted ~= nil, "expected an accepted sample")
+	Harness.assertEqual(accepted.position, position)
+	Harness.assertEqual(accepted.rate, rate)
+end
+
+local function assertNoAcceptedSample(playback: Playback)
+	local fields = (playback :: unknown) :: { _acceptedSourcePosition: number?, _acceptedSourceRate: number? }
+	Harness.assertEqual(fields._acceptedSourcePosition, nil)
+	Harness.assertEqual(fields._acceptedSourceRate, nil)
+	Harness.assertEqual(playback:getAcceptedSample(), nil)
+end
+
+Harness.test("fresh and cancelled-before-play playback have no accepted scalar pair", function()
+	local playback = createPlayback({ duration = 10 })
+	assertNoAcceptedSample(playback)
+	Harness.assertFalse(playback:evaluate(timeSample(0, 0)))
+	assertNoAcceptedSample(playback)
+	Harness.assertThrows(function()
+		playback:play(timeSample(0, math.huge))
+	end, "rate must be finite")
+	assertNoAcceptedSample(playback)
+	playback:cancel()
+	Harness.assertEqual(playback:getStatus(), "cancelled")
+	assertNoAcceptedSample(playback)
+	playback:play(timeSample(0, 0))
+	Harness.assertFalse(playback:evaluate(timeSample(0, 0)))
+	assertNoAcceptedSample(playback)
+end)
+
+Harness.test("zero source position and rate are accepted through play direct and reentrant evaluation", function()
+	local scratch = timeSample(0, 0)
+	local rates: { number } = {}
+	local queueZero = false
+	local playback: Playback
+	playback = createPlayback({
+		duration = 10,
+		samples = {
+			{
+				run = function(_control, info)
+					table.insert(rates, info.rate)
+					if queueZero then
+						queueZero = false
+						scratch.position = 0
+						scratch.rate = 0
+						playback:evaluate(scratch)
+						scratch.position = 999
+						scratch.rate = -999
+					end
+				end,
+			},
+		},
+	}, { position = { timePosition = 5 }, initialMode = "skip" })
+	playback:play(scratch)
+	scratch.position = 999
+	scratch.rate = -999
+	assertAccepted(playback, 0, 0)
+	Harness.assertEqual(playback:getStatus(), "playing")
+	Harness.assertTrue(playback:evaluate(timeSample(0, 0)))
+	assertAccepted(playback, 0, 0)
+	queueZero = true
+	Harness.assertTrue(playback:evaluate(timeSample(1, 2)))
+	assertAccepted(playback, 0, 0)
+	Harness.assertArrayEqual(rates, { 0, 0, 2, 0 })
+	Harness.assertEqual(playback:getPosition().timePosition, 5)
+	local observed = playback:getAcceptedSample()
+	assert(observed ~= nil, "zero pair must produce an accepted sample observation")
+	observed.position = 888
+	observed.rate = -888
+	assertAccepted(playback, 0, 0)
+	playback:cancel()
+	assertAccepted(playback, 0, 0)
+end)
+
+Harness.test("malformed sample fields fail before installing either accepted scalar", function()
+	local invalidSamples: { { [string]: unknown } } = {
+		{},
+		{ position = 0 },
+		{ rate = 0 },
+		{ position = "0", rate = 0 },
+		{ position = 0, rate = "0" },
+		{ position = false, rate = 0 },
+		{ position = 0, rate = false },
+	}
+	for _, fields in invalidSamples do
+		local sample = (fields :: unknown) :: TimeSample
+		local playback = createPlayback({ duration = 10 })
+		Harness.assertThrows(function()
+			playback:play(sample)
+		end, "must be finite")
+		Harness.assertEqual(playback:getStatus(), "idle")
+		assertNoAcceptedSample(playback)
+		playback:play(timeSample(2, 3))
+		Harness.assertThrows(function()
+			playback:evaluate(sample)
+		end, "must be finite")
+		Harness.assertThrows(function()
+			playback:acceptSourceSample(sample)
+		end, "must be finite")
+		assertAccepted(playback, 2, 3)
+		playback:cancel()
+		Harness.assertThrows(function()
+			playback:evaluate(sample)
+		end, "must be finite")
+		assertAccepted(playback, 2, 3)
+	end
+end)
+
+Harness.test("position output buffers are reusable and never retained", function()
+	local playback = createPlayback({ duration = 10, loop = true })
+	local output = { timePosition = -1, loopIndex = -1, unwrappedTimePosition = -1 }
+	playback:play(timeSample(0))
+	playback:evaluate(timeSample(12))
+	playback:writePositionInto(output)
+	Harness.assertEqual(output.timePosition, 2)
+	Harness.assertEqual(output.loopIndex, 1)
+	Harness.assertEqual(output.unwrappedTimePosition, 12)
+	output.timePosition = 999
+	output.loopIndex = 999
+	output.unwrappedTimePosition = 999
+	playback:evaluate(timeSample(13))
+	Harness.assertEqual(output.timePosition, 999)
+	playback:writePositionInto(output)
+	Harness.assertEqual(output.timePosition, 3)
+	Harness.assertEqual(output.loopIndex, 1)
+	Harness.assertEqual(output.unwrappedTimePosition, 13)
+end)
+
+Harness.test("reused forecasts clear stale fields across rates pause and terminal states", function()
+	local playback = createPlayback({ duration = 10, samples = { { run = function() end } } })
+	local output: { phaseRequired: boolean, sourceBoundary: number?, sourceDirection: ("forward" | "backward")? } = {
+		phaseRequired = true,
+		sourceBoundary = 999,
+		sourceDirection = "backward",
+	}
+	playback:writeTraversalForecastInto(output)
+	Harness.assertFalse(output.phaseRequired)
+	Harness.assertEqual(output.sourceBoundary, nil)
+	Harness.assertEqual(output.sourceDirection, nil)
+	playback:play(timeSample(100))
+	playback:writeTraversalForecastInto(output)
+	Harness.assertTrue(output.phaseRequired)
+	Harness.assertEqual(output.sourceBoundary, 110)
+	Harness.assertEqual(output.sourceDirection, "forward")
+	playback:evaluate(timeSample(102, 0))
+	playback:writeTraversalForecastInto(output)
+	Harness.assertTrue(output.phaseRequired)
+	Harness.assertEqual(output.sourceBoundary, nil)
+	Harness.assertEqual(output.sourceDirection, nil)
+	playback:evaluate(timeSample(102, -1))
+	playback:writeTraversalForecastInto(output)
+	Harness.assertEqual(output.sourceBoundary, 100)
+	Harness.assertEqual(output.sourceDirection, "backward")
+	playback:pause()
+	playback:writeTraversalForecastInto(output)
+	Harness.assertFalse(output.phaseRequired)
+	Harness.assertEqual(output.sourceBoundary, nil)
+	playback:cancel()
+	playback:writeTraversalForecastInto(output)
+	Harness.assertFalse(output.phaseRequired)
+	Harness.assertEqual(output.sourceDirection, nil)
+end)
+
+Harness.test("sample snapshots stay immutable and detached across later evaluations", function()
+	local observed: { SampleInfo } = {}
+	local playback = createPlayback({
+		duration = 10,
+		samples = { {
+			run = function(_control, info)
+				table.insert(observed, info)
+			end,
+		} },
+	})
+	playback:play(timeSample(0, 2))
+	playback:evaluate(timeSample(1, 3))
+	Harness.assertEqual(observed[1].position.timePosition, 0)
+	Harness.assertEqual(observed[1].rate, 2)
+	Harness.assertEqual(observed[2].position.timePosition, 1)
+	Harness.assertEqual(observed[2].rate, 3)
+	Harness.assertThrows(function()
+		observed[1].rate = 999
+	end)
+	Harness.assertThrows(function()
+		observed[1].position.timePosition = 999
+	end)
+end)
+
+Harness.test("borrowed play and evaluate samples retain independent scalar anchors", function()
+	local rates: { number } = {}
+	local playback = createPlayback({
+		duration = 100,
+		samples = {
+			{
+				run = function(_control, info)
+					table.insert(rates, info.rate)
+				end,
+			},
+		},
+	})
+	local scratch = timeSample(10, 2)
+	playback:play(scratch)
+	scratch.position = 900
+	scratch.rate = -100
+	assertAccepted(playback, 10, 2)
+	playback:setPlaybackSpeed(2)
+	playback:evaluate(timeSample(11, 3))
+	Harness.assertEqual(playback:getPosition().timePosition, 2)
+	scratch.position = 12
+	scratch.rate = 4
+	Harness.assertTrue(playback:evaluate(scratch))
+	scratch.position = 1_000
+	scratch.rate = -200
+	assertAccepted(playback, 12, 4)
+	playback:setPlaybackSpeed(3)
+	playback:seek({ timePosition = 5 }, "skip")
+	playback:evaluate(timeSample(13, 5))
+	Harness.assertEqual(playback:getPosition().timePosition, 8)
+	Harness.assertArrayEqual(rates, { 2, 6, 8, 12, 15 })
+end)
+
+Harness.test("two playbacks retain independent values from one reused sample scratch", function()
+	local sequence = Pulse.sequence({ duration = 100 })
+	local first = Pulse.playback(sequence, nil)
+	local second = Pulse.playback(sequence, nil)
+	local scratch = timeSample(10, 2)
+	first:play(scratch)
+	scratch.position = 20
+	scratch.rate = 3
+	second:play(scratch)
+	scratch.position = 11
+	scratch.rate = 4
+	first:evaluate(scratch)
+	scratch.position = 22
+	scratch.rate = 5
+	second:evaluate(scratch)
+	scratch.position = 999
+	scratch.rate = -999
+	assertAccepted(first, 11, 4)
+	assertAccepted(second, 22, 5)
+	first:setPlaybackSpeed(2)
+	second:setPlaybackSpeed(3)
+	first:evaluate(timeSample(12))
+	second:evaluate(timeSample(23))
+	Harness.assertEqual(first:getPosition().timePosition, 3)
+	Harness.assertEqual(second:getPosition().timePosition, 5)
+end)
+
+Harness.test("reentrant evaluations snapshot reused scratch values and drain FIFO", function()
+	local positions: { number } = {}
+	local rates: { number } = {}
+	local queued = false
+	local scratch = timeSample(10, 1)
+	local playback: Playback
+	playback = createPlayback({
+		duration = 100,
+		samples = {
+			{
+				run = function(_control, info)
+					table.insert(positions, info.position.timePosition)
+					table.insert(rates, info.rate)
+					if not queued then
+						queued = true
+						for index = 1, 3 do
+							scratch.position = 10 + index
+							scratch.rate = index * 2
+							Harness.assertTrue(playback:evaluate(scratch))
+						end
+						scratch.position = 999
+						scratch.rate = -999
+					end
+				end,
+			},
+		},
+	})
+	playback:play(scratch)
+	Harness.assertArrayEqual(positions, { 0, 1, 2, 3 })
+	Harness.assertArrayEqual(rates, { 1, 2, 4, 6 })
+	assertAccepted(playback, 13, 6)
+end)
+
+Harness.test("reentrant evaluation and control mixtures preserve order around the direct path", function()
+	local positions: { number } = {}
+	local rates: { number } = {}
+	local queued = false
+	local scratch = timeSample(0)
+	local playback: Playback
+	playback = createPlayback({
+		duration = 100,
+		samples = {
+			{
+				run = function(control, info)
+					table.insert(positions, info.position.timePosition)
+					table.insert(rates, info.rate)
+					if info.position.timePosition == 1 and not queued then
+						queued = true
+						scratch.position = 2
+						scratch.rate = 2
+						Harness.assertTrue(playback:evaluate(scratch))
+						control:setPlaybackSpeed(2)
+						scratch.position = 3
+						scratch.rate = 3
+						Harness.assertTrue(playback:evaluate(scratch))
+						control:seek({ timePosition = 10 }, "skip")
+						scratch.position = 4
+						scratch.rate = 4
+						Harness.assertTrue(playback:evaluate(scratch))
+						control:pause()
+						scratch.position = 5
+						scratch.rate = 5
+						Harness.assertTrue(playback:evaluate(scratch))
+						scratch.position = 999
+						scratch.rate = -999
+					end
+				end,
+			},
+		},
+	})
+	playback:play(timeSample(0))
+	scratch.position = 1
+	Harness.assertTrue(playback:evaluate(scratch))
+	Harness.assertArrayEqual(positions, { 0, 1, 2, 4, 10, 12 })
+	Harness.assertArrayEqual(rates, { 1, 1, 2, 6, 6, 8 })
+	Harness.assertEqual(playback:getStatus(), "paused")
+	assertAccepted(playback, 4, 4)
+	playback:resume()
+	scratch.position = 100
+	scratch.rate = 7
+	playback:evaluate(scratch)
+	scratch.position = 999
+	assertAccepted(playback, 100, 7)
+	Harness.assertEqual(playback:getPosition().timePosition, 12)
+end)
+
+Harness.test("invalid evaluation samples raise before inactive and terminal status rejection", function()
+	local playback = createPlayback({ duration = 10 })
+	local function assertInvalid()
+		for _, invalid in { math.huge, -math.huge, 0 / 0 } do
+			Harness.assertThrows(function()
+				playback:evaluate(timeSample(invalid))
+			end, "position must be finite")
+			Harness.assertThrows(function()
+				playback:evaluate(timeSample(0, invalid))
+			end, "rate must be finite")
+		end
+		Harness.assertThrows(function()
+			playback:evaluate((false :: unknown) :: TimeSample)
+		end, "TimeSample must be a table")
+	end
+	assertInvalid()
+	Harness.assertFalse(playback:evaluate(timeSample(0)))
+	Harness.assertThrows(function()
+		playback:play(timeSample(math.huge))
+	end, "position must be finite")
+	Harness.assertEqual(playback:getStatus(), "idle")
+	playback:play(timeSample(0))
+	assertInvalid()
+	playback:pause()
+	assertInvalid()
+	Harness.assertFalse(playback:evaluate(timeSample(0)))
+	playback:cancel()
+	assertInvalid()
+	Harness.assertFalse(playback:evaluate(timeSample(0)))
+	-- Repeated play retains its existing idempotent no-op boundary.
+	Harness.assertEqual(playback:play(timeSample(math.huge)), playback)
+end)
+
+Harness.test("accepted sample observation and ClockDriver acceptance seam are detached", function()
+	local playback = createPlayback({ duration = 100 })
+	Harness.assertEqual(playback:getAcceptedSample(), nil)
+	playback:play(timeSample(10, 2))
+	local observed = playback:getAcceptedSample()
+	assert(observed ~= nil, "expected an accepted sample observation")
+	observed.position = 999
+	observed.rate = -999
+	assertAccepted(playback, 10, 2)
+	local scratch = timeSample(20, 3)
+	playback:acceptSourceSample(scratch)
+	scratch.position = 888
+	scratch.rate = -888
+	assertAccepted(playback, 20, 3)
+	playback:setPlaybackSpeed(2)
+	playback:evaluate(timeSample(21, 4))
+	Harness.assertEqual(playback:getPosition().timePosition, 2)
+	assertAccepted(playback, 21, 4)
+end)
+
+Harness.test("direct evaluations reset work budgets while reentrant evaluations share them", function()
+	local callbacks = 0
+	local remaining = 0
+	local scratch = timeSample(0)
+	local playback: Playback
+	playback = createPlayback({
+		duration = 100,
+		samples = {
+			{
+				run = function()
+					callbacks += 1
+					if remaining > 0 then
+						remaining -= 1
+						playback:evaluate(scratch)
+					end
+				end,
+			},
+		},
+	})
+	playback:play(scratch)
+	for _ = 1, 2 do
+		local before = callbacks
+		remaining = 4_095
+		Harness.assertTrue(playback:evaluate(scratch))
+		Harness.assertEqual(callbacks - before, 4_096)
+		Harness.assertEqual(playback:getStatus(), "playing")
+	end
+	local before = callbacks
+	remaining = 4_096
+	Harness.assertTrue(playback:evaluate(scratch))
+	Harness.assertEqual(callbacks - before, 4_096)
+	Harness.assertEqual((playback:getCompletion() :: Completion).reason, "catchUpLimitExceeded")
+end)
+
+Harness.test("direct evaluation preserves pending terminal validation and discards queued work", function()
+	local playback: Playback
+	local validatedBusy = false
+	local validatedTerminal = false
+	local rejectedTerminal = false
+	local samples = 0
+	playback = createPlayback({
+		duration = 10,
+		events = {
+			{
+				time = 1,
+				run = function(control)
+					validatedBusy = not pcall(function()
+						playback:evaluate(timeSample(math.huge))
+					end)
+					playback:evaluate(timeSample(2))
+					control:cancel("during evaluation")
+					validatedTerminal = not pcall(function()
+						playback:evaluate(timeSample(2, math.huge))
+					end)
+					rejectedTerminal = not playback:evaluate(timeSample(3))
+				end,
+			},
+		},
+		samples = {
+			{
+				run = function()
+					samples += 1
+				end,
+			},
+		},
+	})
+	playback:play(timeSample(0))
+	Harness.assertTrue(playback:evaluate(timeSample(1)))
+	Harness.assertTrue(validatedBusy)
+	Harness.assertTrue(validatedTerminal)
+	Harness.assertTrue(rejectedTerminal)
+	Harness.assertEqual(samples, 1)
+	Harness.assertEqual((playback:getCompletion() :: Completion).reason, "during evaluation")
+	assertAccepted(playback, 0, 1)
+end)
+
+Harness.test("direct and queued evaluation retain callback failure and numeric overflow results", function()
+	for _, reentrant in { false, true } do
+		local playback: Playback
+		playback = createPlayback({
+			duration = 10,
+			events = {
+				{
+					time = 1,
+					run = function()
+						error("callback failure")
+					end,
+				},
+			},
+			onPlay = if reentrant
+				then function()
+					playback:evaluate(timeSample(1))
+				end
+				else nil,
+		})
+		playback:play(timeSample(0))
+		if not reentrant then
+			Harness.assertTrue(playback:evaluate(timeSample(1)))
+		end
+		Harness.assertEqual((playback:getCompletion() :: Completion).reason, "callbackFailed")
+	end
+	local playback = createPlayback({ duration = 10 })
+	playback:play(timeSample(-1e308))
+	Harness.assertTrue(playback:evaluate(timeSample(1e308)))
+	Harness.assertEqual((playback:getCompletion() :: Completion).reason, "numericOverflow")
+end)
 
 Harness.test("core compiler freezes declarations and exposes no sequence address policy", function()
 	local instant = Pulse.sequence({ duration = 0 })

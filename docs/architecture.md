@@ -12,6 +12,30 @@ ProviderClock -> optional ClockDriver --------------|
 
 The raw core never requires a clock-driver type. `ClockDriver` depends on and drives `Playback`.
 
+## Module and contract layout
+
+`src/init.luau` is the sole package facade. Runtime object families and their canonical type
+leaves classify execution availability with `shared/`; there are no server/client counterparts
+because Pulse is shared code. Vocabulary lives under `common/`, inert records under semantic
+`types/def/` leaves, and public object surfaces stay with their private implementation contracts.
+Each runtime object has one implementation file: `Playback` owns evaluation, traversal, and
+cleanup in `components/playback/shared/playback.luau`; `Sequence` owns compilation and timeline
+queries in `components/sequence/shared/sequence.luau`. Local helpers stay with their object,
+and canonical types remain separate. Sequence
+authoring uses the sibling `SequenceBuilder` object and its `Pulse.SequenceBuilder` type.
+
+Independent capabilities live under subject-owned `types/ports/`: `PlaybackControl` is the
+authored callback view, `PlaybackDriver` is the internal driving capability, `ProviderClock` is
+the provider-neutral clock protocol, and `ClockDriverCommands` is the parent capability held by
+a `DrivenPlayback`. These are structural views of existing objects, without wrapper allocations.
+Private operations and notifications remain object-owned data. Driver-only methods are omitted
+from the public `Pulse.Playback` type. Sequence timeline-query methods belong to the internal
+`SequenceStored` view used by Playback and are omitted from the public `Pulse.Sequence` type. Final owner teardown is named `deconstruct`; provider
+destruction detection and the terminal `destroyed` status retain their existing meanings.
+
+Numeric implementation modules retain `--!native`. Type, definition, vocabulary, facade, and
+construction-only modules do not request native compilation.
+
 ## Ownership
 
 | Role | Owns | Does not own |
@@ -44,6 +68,34 @@ sequencePosition =
 into that displacement. Rate is an atomic description of the source at the sampled coordinate. A
 sampler receives `sample.rate * playbackSpeed`, which may be negative or zero.
 
+Input `TimeSample` tables are borrowed only for the synchronous call. Playback validates and
+snapshots `position` and `rate` into scalar locals, then retains accepted source position and rate
+as optional scalar fields: `_acceptedSourcePosition: number?` and `_acceptedSourceRate: number?`.
+Both are `nil` before acceptance (including cancellation before play) and numbers afterward;
+`{ position = 0, rate = 0 }` is accepted state. A single internal helper writes both scalars
+synchronously without callbacks or yielding, preserving the both-present-or-both-absent invariant.
+It never retains or clones the caller-owned table,
+including at the internal ClockDriver acceptance seam. A host may reuse one scratch table across
+playbacks and mutate it immediately after each call returns.
+
+A non-busy `evaluate` passes those scalars directly into the protected operation drain without an
+evaluation operation record. Reentrant evaluations queue records containing independent position
+and rate scalars; they remain FIFO with control operations and share the enclosing work budget.
+The internal `getAcceptedSample` observation returns a newly allocated detached record.
+
+`writePositionInto(output)` fills a caller-owned position buffer without allocating or retaining
+it; `getPosition()` continues returning a detached record. Sampling creates its immutable position
+and `SampleInfo` only when an authored sampler is active. Delivered callback records may be retained
+and are never overwritten by later evaluations.
+
+Each driven attachment owns a reusable forecast output. Playback computes its next forecast boundary
+into an owned scratch record through `nextBoundaryInto`, avoiding temporary forecast/boundary tables.
+ClockDriver reuses an owned membership snapshot during serialized phase/clock dispatch and an owned
+sample scratch for intermediate mapping boundaries. Queued provider notifications still own distinct
+samples; they never retain that scratch. Seek queues retain the already validated detached address
+instead of copying it again. Cursor/traversal records and immutable callback records retain their
+existing ownership; they are not pooled or shared across playbacks.
+
 Core state changes only through `play(sample)`, `evaluate(sample)`, or explicit Playback controls.
 `getPosition()` returns the last accepted cursor and never reads or projects implicit time.
 At an explicitly addressed duration-side loop join, the exact identity remains visible until a
@@ -51,7 +103,7 @@ future forward evaluation consumes the loop crossing and next-cycle zero boundar
 
 ### Mutation timestamps
 
-Pause, speed, seek, cancel, and destroy act at the Playback's currently accepted evaluated
+Pause, speed, seek, cancel, and deconstruct act at the Playback's currently accepted evaluated
 coordinate. A raw host that needs a mutation at a newer coordinate must call `evaluate` first.
 The driven facade performs that current provider read/evaluation before external mutations while
 playing. Resume is special: the first subsequent sample re-anchors the stored paused position, so

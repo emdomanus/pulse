@@ -19,7 +19,7 @@ local Pulse = require(ReplicatedStorage.packages.pulse)
 | Export | Signature | Canonical API |
 | --- | --- | --- |
 | `sequence` | `<C>(SequenceDefinition<C>) -> Sequence<C>` | [`Pulse.sequence`](./components/sequence.md#pulse-sequence) |
-| `builder` | `<C>() -> Builder<C>` | [`Pulse.builder`](./components/builder.md#pulse-builder) |
+| `builder` | `<C>() -> SequenceBuilder<C>` | [`Pulse.builder`](./components/builder.md#pulse-builder) |
 | `playback` | `<C>(Sequence<C>, C, PlaybackOptions?) -> Playback` | [`Pulse.playback`](./components/playback.md#pulse-playback) |
 | `clockDriver` | `<P, D>(ProviderClock<P, D>, P, DirectionTokens<D>) -> ClockDriver` | [`Pulse.clockDriver`](./managers/clockDriver.md#pulse-clock-driver) |
 
@@ -28,7 +28,7 @@ local Pulse = require(ReplicatedStorage.packages.pulse)
 | Object | Responsibility |
 | --- | --- |
 | [`Sequence<ContextT>`](./components/sequence.md#sequence) | Immutable reusable timeline tied to its callback context type |
-| [`Builder<ContextT>`](./components/builder.md#builder) | Mutable fluent authoring helper |
+| [`SequenceBuilder<ContextT>`](./components/builder.md#builder) | Mutable fluent authoring helper |
 | Raw [`Playback`](./components/playback.md#playback) | Externally sampled traversal and one lifecycle |
 | [`ClockDriver`](./managers/clockDriver.md#clock-driver) | Optional borrowed-clock scheduling and fan-out |
 | [`DrivenPlayback`](./managers/clockDriver.md#driven-playback) | Clock-driven facade for one attached raw Playback |

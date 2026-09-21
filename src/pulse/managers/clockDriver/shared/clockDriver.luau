@@ -2,110 +2,56 @@
 --!optimize 2
 --!native
 
-local DefTypes = require(script.Parent.Parent.Parent.Parent.types.def)
-local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.types.components.playback)
-local Types = require(script.Parent.Parent.Parent.Parent.types.managers.clockDriver)
-local PlaybackModule = require(script.Parent.Parent.Parent.Parent.components.playback.shared.playback)
+local PlaybackTraversalTypes =
+	require(script.Parent.Parent.Parent.Parent.types.components.playback.shared.playbackTraversal)
+local ClockDriverVocabulary =
+	require(script.Parent.Parent.Parent.Parent.common.clockDriver.shared.clockDriverVocabulary)
 
-type AddressMode = DefTypes.AddressMode
-type ClockDriver = Types.ClockDriver
-type ClockDriverAttachmentOptions = Types.ClockDriverAttachmentOptions
-type Completion = DefTypes.Completion
-type DirectionTokens<DirectionTokenT> = Types.DirectionTokens<DirectionTokenT>
-type DrivenPlayback = Types.DrivenPlayback
-type DriverDiscontinuityMode = Types.DriverDiscontinuityMode
+local PlaybackDefinitions = require(script.Parent.Parent.Parent.Parent.types.def.playback.shared.playbackDefinitions)
+local PlaybackTypes = require(script.Parent.Parent.Parent.Parent.types.components.playback.shared.playback)
+local ClockDriverTypes = require(script.Parent.Parent.Parent.Parent.types.managers.clockDriver.shared.clockDriver)
+local DrivenPlaybackTypes =
+	require(script.Parent.Parent.Parent.Parent.types.managers.clockDriver.shared.clockDriver.drivenPlayback)
+local ClockDriverNotifications =
+	require(script.Parent.Parent.Parent.Parent.types.managers.clockDriver.shared.clockDriver.clockDriverNotifications)
+local ProviderClockTypes = require(script.Parent.Parent.Parent.Parent.types.ports.components.clock.shared.providerClock)
+local DrivenPlayback = require(script.Parent.drivenPlayback)
+local PlaybackVocabulary = require(script.Parent.Parent.Parent.Parent.common.playback.shared.playbackVocabulary)
+
+type AddressMode = PlaybackVocabulary.AddressMode
+type ClockDriver = ClockDriverTypes.ClockDriver
+type ClockDriverAttachmentOptions = ClockDriverTypes.ClockDriverAttachmentOptions
+type Completion = PlaybackDefinitions.Completion
+type DirectionTokens<DirectionTokenT> = ProviderClockTypes.DirectionTokens<DirectionTokenT>
+type DrivenPlayback = DrivenPlaybackTypes.DrivenPlayback
+type DriverDiscontinuityMode = ClockDriverTypes.DriverDiscontinuityMode
 type EndedCallback = PlaybackTypes.EndedCallback
 type LoopedCallback = PlaybackTypes.LoopedCallback
-type PhaseCallback = Types.PhaseCallback
+type PhaseCallback = ProviderClockTypes.PhaseCallback
 type Playback = PlaybackTypes.Playback
-type PlaybackPosition = DefTypes.PlaybackPosition
-type ProviderClock<PhaseInputT, DirectionTokenT> = Types.ProviderClock<PhaseInputT, DirectionTokenT>
-type RawClockChangedCallback = Types.RawClockChangedCallback
-type ReachedCallback = Types.ReachedCallback
-type Release = DefTypes.Release
-type ScheduledTaskId = Types.ScheduledTaskId
-type SequenceAddress = DefTypes.SequenceAddress
-type Status = DefTypes.Status
-type StoredClock = Types.StoredClock
-type TimeSample = DefTypes.TimeSample
-type TraversalForecast = PlaybackTypes.TraversalForecast
-type TraversalDirection = DefTypes.TraversalDirection
+type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
+type ProviderClock<PhaseInputT, DirectionTokenT> = ProviderClockTypes.ProviderClock<PhaseInputT, DirectionTokenT>
+type RawClockChangedCallback = ProviderClockTypes.RawClockChangedCallback
+type ReachedCallback = ProviderClockTypes.ReachedCallback
+type Release = PlaybackDefinitions.Release
+type ScheduledTaskId = ProviderClockTypes.ScheduledTaskId
+type SequenceAddress = PlaybackDefinitions.SequenceAddress
+type Status = PlaybackVocabulary.Status
+type StoredProviderClock = ProviderClockTypes.StoredProviderClock
+type TimeSample = PlaybackDefinitions.TimeSample
+type TraversalForecast = PlaybackTraversalTypes.TraversalForecast
+type TraversalDirection = PlaybackVocabulary.TraversalDirection
 
-type ProviderChange = {
-	kind: string?,
-	previousPosition: number?,
-	currentPosition: number,
-	discontinuous: boolean,
-}
-
-type ControlKind = "play" | "pause" | "resume" | "speed" | "seek" | "cleanup" | "cancel" | "destroy" | "detach"
-
-type ClockNotification = {
-	kind: "clock",
-	change: ProviderChange,
-	previousSample: TimeSample,
-	sample: TimeSample,
-}
-
-type PhaseNotification = {
-	kind: "phase",
-	sample: TimeSample,
-}
-
-type ReachedNotification = {
-	kind: "reached",
-	attachment: DrivenPlayback,
-	generation: number,
-	direction: unknown,
-}
-
-type ControlNotification = {
-	kind: "control",
-	attachment: DrivenPlayback,
-	operation: ControlKind,
-	speed: number?,
-	address: SequenceAddress?,
-	mode: AddressMode?,
-	cleanup: (() -> ())?,
-	reason: string?,
-	result: boolean?,
-}
-
-type Notification = ClockNotification | PhaseNotification | ReachedNotification | ControlNotification
-
-type AttachmentImpl = DrivenPlayback & {
-	_driver: ClockDriver,
-	_playback: Playback,
-	_discontinuityMode: DriverDiscontinuityMode,
-	_attached: boolean,
-	_active: boolean,
-	_scheduledId: ScheduledTaskId?,
-	_scheduledSourcePosition: number?,
-	_scheduledDirection: TraversalDirection?,
-	_taskGeneration: number,
-	_reachedSample: TimeSample?,
-	_endedRelease: Release?,
-}
-
-type ClockDriverImpl = ClockDriver & {
-	_clock: StoredClock,
-	_phase: unknown,
-	_directions: DirectionTokens<unknown>,
-	_destroyed: boolean,
-	_attachments: { DrivenPlayback },
-	_attachmentMembership: { [DrivenPlayback]: true },
-	_active: { DrivenPlayback },
-	_activeMembership: { [DrivenPlayback]: true },
-	_phaseAttachments: { DrivenPlayback },
-	_phaseMembership: { [DrivenPlayback]: true },
-	_changedRelease: Release?,
-	_phaseRelease: Release?,
-	_changedCallback: RawClockChangedCallback,
-	_phaseCallback: PhaseCallback,
-	_notifications: { Notification },
-	_notifying: boolean,
-	_lastSample: TimeSample,
-}
+type ClockDriverImpl = ClockDriverTypes.ClockDriverImpl
+type DrivenPlaybackImpl = DrivenPlaybackTypes.DrivenPlaybackImpl
+type PlaybackDriven = PlaybackTypes.PlaybackDriven
+type ProviderClockChange = ClockDriverNotifications.ProviderClockChange
+type ClockDriverControlKind = ClockDriverVocabulary.ClockDriverControlKind
+type ClockDriverClockNotification = ClockDriverNotifications.ClockDriverClockNotification
+type ClockDriverPhaseNotification = ClockDriverNotifications.ClockDriverPhaseNotification
+type ClockDriverReachedNotification = ClockDriverNotifications.ClockDriverReachedNotification<DrivenPlayback>
+type ClockDriverControlNotification = ClockDriverNotifications.ClockDriverControlNotification<DrivenPlayback>
+type ClockDriverNotification = ClockDriverNotifications.ClockDriverNotification<DrivenPlayback>
 
 type ClockDriverModule = {
 	new: <PhaseInputT, DirectionTokenT>(
@@ -120,24 +66,18 @@ local DOUBLE_EPSILON = 2 ^ -52
 -- The exercised 128-tick forward and backward profiles stay below ten scaled epsilon units.
 local DEADLINE_TOLERANCE = 16 * DOUBLE_EPSILON
 
-local DriverMethods = {}
-DriverMethods.__index = DriverMethods
-
-local DrivenMethods = {}
-DrivenMethods.__index = DrivenMethods
-
-local attachmentByPlayback = (setmetatable({}, { __mode = "k" }) :: unknown) :: { [Playback]: AttachmentImpl }
+local drivenPlaybackByPlayback = (setmetatable({}, { __mode = "k" }) :: unknown) :: { [Playback]: DrivenPlaybackImpl }
 
 local dispatchNotifications: (self: ClockDriverImpl) -> ()
-local refreshAttachment: (
+local refreshDrivenPlayback: (
 	self: ClockDriverImpl,
-	attachment: AttachmentImpl,
+	drivenPlayback: DrivenPlaybackImpl,
 	currentSample: TimeSample?,
 	reachedTaskFired: boolean?
 ) -> ()
 
 local function isFinite(value: number): boolean
-	return value == value and value ~= math.huge and value ~= -math.huge
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
 end
 
 local function sameSourceCoordinate(first: number, second: number): boolean
@@ -145,12 +85,8 @@ local function sameSourceCoordinate(first: number, second: number): boolean
 	return math.abs(first - second) <= DEADLINE_TOLERANCE * magnitude
 end
 
-local function asDriver(driver: ClockDriver): ClockDriverImpl
-	return (driver :: unknown) :: ClockDriverImpl
-end
-
-local function asAttachment(attachment: DrivenPlayback): AttachmentImpl
-	return (attachment :: unknown) :: AttachmentImpl
+local function asDrivenPlayback(drivenPlayback: DrivenPlayback): DrivenPlaybackImpl
+	return (drivenPlayback :: unknown) :: DrivenPlaybackImpl
 end
 
 local function assertProviderSample(value: unknown): TimeSample
@@ -166,7 +102,7 @@ local function assertProviderSample(value: unknown): TimeSample
 	}
 end
 
-local function assertProviderChange(value: unknown): ProviderChange
+local function assertProviderChange(value: unknown): ProviderClockChange
 	assert(type(value) == "table", "Pulse provider change must be a table")
 	local fields = value :: { [string]: unknown }
 	local kind = fields.kind
@@ -196,11 +132,6 @@ local function validateDiscontinuityMode(mode: DriverDiscontinuityMode): DriverD
 	return mode
 end
 
-local function validateAddressMode(mode: AddressMode): AddressMode
-	assert(mode == "skip" or mode == "reconstruct", "Pulse address mode must be 'reconstruct' or 'skip'")
-	return mode
-end
-
 local function releaseSafely(release: Release?)
 	if release ~= nil then
 		pcall(release)
@@ -208,7 +139,7 @@ local function releaseSafely(release: Release?)
 end
 
 local function clockIsDestroyed(self: ClockDriverImpl): boolean
-	local ok, destroyed = pcall(self._clock.isDestroyed, self._clock)
+	local ok, destroyed = pcall(self._providerClock.isDestroyed, self._providerClock)
 	return not ok or destroyed ~= false
 end
 
@@ -216,7 +147,7 @@ local function readClock(self: ClockDriverImpl): TimeSample?
 	if self._destroyed or clockIsDestroyed(self) then
 		return nil
 	end
-	local readOk, rawSample = pcall(self._clock.read, self._clock)
+	local readOk, rawSample = pcall(self._providerClock.read, self._providerClock)
 	if not readOk then
 		return nil
 	end
@@ -248,40 +179,41 @@ local function removeMember(
 	return true
 end
 
-local function cancelScheduled(self: ClockDriverImpl, attachment: AttachmentImpl)
-	local id = attachment._scheduledId
-	attachment._scheduledId = nil
-	attachment._scheduledSourcePosition = nil
-	attachment._scheduledDirection = nil
-	attachment._taskGeneration += 1
+local function cancelScheduled(self: ClockDriverImpl, drivenPlayback: DrivenPlaybackImpl)
+	local id = drivenPlayback._scheduledId
+	drivenPlayback._scheduledId = nil
+	drivenPlayback._scheduledSourcePosition = nil
+	drivenPlayback._scheduledDirection = nil
+	drivenPlayback._taskGeneration += 1
 	if id ~= nil then
-		pcall(self._clock.cancel, self._clock, id)
+		pcall(self._providerClock.cancel, self._providerClock, id)
 	end
 end
 
-local function setPhaseRequired(self: ClockDriverImpl, attachment: AttachmentImpl, required: boolean): boolean
-	local publicAttachment = (attachment :: unknown) :: DrivenPlayback
+local function setPhaseRequired(self: ClockDriverImpl, drivenPlayback: DrivenPlaybackImpl, required: boolean): boolean
+	local publicDrivenPlayback = (drivenPlayback :: unknown) :: DrivenPlayback
 	if required then
-		if self._destroyed or not attachment._active then
+		if self._destroyed or not drivenPlayback._active then
 			return false
 		end
-		if self._phaseMembership[publicAttachment] ~= nil then
+		if self._phaseMembership[publicDrivenPlayback] ~= nil then
 			return true
 		end
-		if #self._phaseAttachments == 0 then
-			local ok, release = pcall(self._clock.bindPhase, self._clock, self._phase, self._phaseCallback)
+		if #self._phaseDrivenPlaybacks == 0 then
+			local ok, release =
+				pcall(self._providerClock.bindPhase, self._providerClock, self._phase, self._phaseCallback)
 			if not ok or type(release) ~= "function" then
 				return false
 			end
 			self._phaseRelease = release
 		end
-		table.insert(self._phaseAttachments, publicAttachment)
-		self._phaseMembership[publicAttachment] = true
+		table.insert(self._phaseDrivenPlaybacks, publicDrivenPlayback)
+		self._phaseMembership[publicDrivenPlayback] = true
 		return true
 	end
 
-	if removeMember(self._phaseAttachments, self._phaseMembership, publicAttachment) then
-		if #self._phaseAttachments == 0 then
+	if removeMember(self._phaseDrivenPlaybacks, self._phaseMembership, publicDrivenPlayback) then
+		if #self._phaseDrivenPlaybacks == 0 then
 			local release = self._phaseRelease
 			self._phaseRelease = nil
 			releaseSafely(release)
@@ -290,55 +222,55 @@ local function setPhaseRequired(self: ClockDriverImpl, attachment: AttachmentImp
 	return true
 end
 
-local function deactivateAttachment(self: ClockDriverImpl, attachment: AttachmentImpl)
-	if not attachment._active then
+local function deactivateDrivenPlayback(self: ClockDriverImpl, drivenPlayback: DrivenPlaybackImpl)
+	if not drivenPlayback._active then
 		return
 	end
-	cancelScheduled(self, attachment)
-	setPhaseRequired(self, attachment, false)
-	attachment._active = false
-	local publicAttachment = (attachment :: unknown) :: DrivenPlayback
-	if removeMember(self._active, self._activeMembership, publicAttachment) and #self._active == 0 then
+	cancelScheduled(self, drivenPlayback)
+	setPhaseRequired(self, drivenPlayback, false)
+	drivenPlayback._active = false
+	local publicDrivenPlayback = (drivenPlayback :: unknown) :: DrivenPlayback
+	if removeMember(self._active, self._activeMembership, publicDrivenPlayback) and #self._active == 0 then
 		local release = self._changedRelease
 		self._changedRelease = nil
 		releaseSafely(release)
 	end
 end
 
-local function retireAttachment(self: ClockDriverImpl, attachment: AttachmentImpl)
-	if not attachment._attached then
+local function retireDrivenPlayback(self: ClockDriverImpl, drivenPlayback: DrivenPlaybackImpl)
+	if not drivenPlayback._attached then
 		return
 	end
-	deactivateAttachment(self, attachment)
-	attachment._attached = false
-	if attachmentByPlayback[attachment._playback] == attachment then
-		attachmentByPlayback[attachment._playback] = nil
+	deactivateDrivenPlayback(self, drivenPlayback)
+	drivenPlayback._attached = false
+	if drivenPlaybackByPlayback[drivenPlayback._playback] == drivenPlayback then
+		drivenPlaybackByPlayback[drivenPlayback._playback] = nil
 	end
-	local publicAttachment = (attachment :: unknown) :: DrivenPlayback
-	removeMember(self._attachments, self._attachmentMembership, publicAttachment)
-	local endedRelease = attachment._endedRelease
-	attachment._endedRelease = nil
+	local publicDrivenPlayback = (drivenPlayback :: unknown) :: DrivenPlayback
+	removeMember(self._drivenPlaybacks, self._drivenPlaybackMembership, publicDrivenPlayback)
+	local endedRelease = drivenPlayback._endedRelease
+	drivenPlayback._endedRelease = nil
 	releaseSafely(endedRelease)
 end
 
-local function activateAttachment(self: ClockDriverImpl, attachment: AttachmentImpl): boolean
-	if attachment._active then
+local function activateDrivenPlayback(self: ClockDriverImpl, drivenPlayback: DrivenPlaybackImpl): boolean
+	if drivenPlayback._active then
 		return true
 	end
 	if self._destroyed or clockIsDestroyed(self) then
 		return false
 	end
 	if #self._active == 0 then
-		local ok, release = pcall(self._clock.bindToChanged, self._clock, self._changedCallback, false)
+		local ok, release = pcall(self._providerClock.bindToChanged, self._providerClock, self._changedCallback, false)
 		if not ok or type(release) ~= "function" then
 			return false
 		end
 		self._changedRelease = release
 	end
-	local publicAttachment = (attachment :: unknown) :: DrivenPlayback
-	table.insert(self._active, publicAttachment)
-	self._activeMembership[publicAttachment] = true
-	attachment._active = true
+	local publicDrivenPlayback = (drivenPlayback :: unknown) :: DrivenPlayback
+	table.insert(self._active, publicDrivenPlayback)
+	self._activeMembership[publicDrivenPlayback] = true
+	drivenPlayback._active = true
 	return true
 end
 
@@ -348,22 +280,22 @@ local function terminateDriver(self: ClockDriverImpl, reason: string)
 	end
 	self._destroyed = true
 	self._notifications = {}
-	local attachments = table.clone(self._attachments)
-	for _, publicAttachment in attachments do
-		local attachment = asAttachment(publicAttachment)
-		cancelScheduled(self, attachment)
-		attachment._active = false
-		attachment._attached = false
-		attachment._endedRelease = nil
-		if attachmentByPlayback[attachment._playback] == attachment then
-			attachmentByPlayback[attachment._playback] = nil
+	local drivenPlaybacks = table.clone(self._drivenPlaybacks)
+	for _, publicDrivenPlayback in drivenPlaybacks do
+		local drivenPlayback = asDrivenPlayback(publicDrivenPlayback)
+		cancelScheduled(self, drivenPlayback)
+		drivenPlayback._active = false
+		drivenPlayback._attached = false
+		drivenPlayback._endedRelease = nil
+		if drivenPlaybackByPlayback[drivenPlayback._playback] == drivenPlayback then
+			drivenPlaybackByPlayback[drivenPlayback._playback] = nil
 		end
 	end
-	table.clear(self._attachments)
-	table.clear(self._attachmentMembership)
+	table.clear(self._drivenPlaybacks)
+	table.clear(self._drivenPlaybackMembership)
 	table.clear(self._active)
 	table.clear(self._activeMembership)
-	table.clear(self._phaseAttachments)
+	table.clear(self._phaseDrivenPlaybacks)
 	table.clear(self._phaseMembership)
 	local changedRelease = self._changedRelease
 	local phaseRelease = self._phaseRelease
@@ -371,12 +303,12 @@ local function terminateDriver(self: ClockDriverImpl, reason: string)
 	self._phaseRelease = nil
 	releaseSafely(phaseRelease)
 	releaseSafely(changedRelease)
-	for _, publicAttachment in attachments do
-		PlaybackModule._fail(asAttachment(publicAttachment)._playback, reason)
+	for _, publicDrivenPlayback in drivenPlaybacks do
+		asDrivenPlayback(publicDrivenPlayback)._playback:fail(reason)
 	end
 end
 
-local function enqueueNotification(self: ClockDriverImpl, notification: Notification)
+local function enqueueNotification(self: ClockDriverImpl, notification: ClockDriverNotification)
 	if self._destroyed then
 		return
 	end
@@ -403,17 +335,17 @@ local function readForEvaluation(self: ClockDriverImpl): TimeSample?
 	return sample
 end
 
-local function evaluateCurrent(self: ClockDriverImpl, attachment: AttachmentImpl): TimeSample?
+local function evaluateCurrent(self: ClockDriverImpl, drivenPlayback: DrivenPlaybackImpl): TimeSample?
 	local sample = readForEvaluation(self)
 	if sample == nil then
 		return nil
 	end
-	return if attachment._playback:evaluate(sample) then sample else nil
+	return if drivenPlayback._playback:evaluate(sample) then sample else nil
 end
 
 local function scheduleNext(
 	self: ClockDriverImpl,
-	attachment: AttachmentImpl,
+	drivenPlayback: DrivenPlaybackImpl,
 	initialState: TraversalForecast,
 	initialSample: TimeSample?,
 	reachedTaskFired: boolean
@@ -422,30 +354,33 @@ local function scheduleNext(
 	local state: TraversalForecast? = initialState
 	local current: TimeSample? = initialSample
 	local taskFired = reachedTaskFired
-	while attachment._attached and attachment._active and attachment._playback:getStatus() == "playing" do
+	while drivenPlayback._attached and drivenPlayback._active and drivenPlayback._playback:getStatus() == "playing" do
 		attempts += 1
 		if attempts > MAX_DRIVER_WORK then
-			PlaybackModule._fail(attachment._playback, "driverWorkLimitExceeded")
+			drivenPlayback._playback:fail("driverWorkLimitExceeded")
 			return
 		end
-		local forecast = state or PlaybackModule._getTraversalForecast(attachment._playback)
+		local forecast: TraversalForecast = state or drivenPlayback._forecast
+		if state == nil then
+			drivenPlayback._playback:writeTraversalForecastInto(forecast)
+		end
 		state = nil
-		if not attachment._attached or attachment._playback:getStatus() ~= "playing" then
+		if not drivenPlayback._attached or drivenPlayback._playback:getStatus() ~= "playing" then
 			return
 		end
 		local runAt = forecast.sourceBoundary
 		local direction = forecast.sourceDirection
 		if runAt == nil or direction == nil then
-			cancelScheduled(self, attachment)
+			cancelScheduled(self, drivenPlayback)
 			return
 		end
-		local id = attachment._scheduledId
-		local scheduledSourcePosition = attachment._scheduledSourcePosition
+		local id = drivenPlayback._scheduledId
+		local scheduledSourcePosition = drivenPlayback._scheduledSourcePosition
 		local equivalent = false
 		local effectiveRunAt = runAt
 		if
 			id ~= nil
-			and attachment._scheduledDirection == direction
+			and drivenPlayback._scheduledDirection == direction
 			and scheduledSourcePosition ~= nil
 			and sameSourceCoordinate(scheduledSourcePosition, runAt)
 		then
@@ -463,8 +398,8 @@ local function scheduleNext(
 			then current.position >= effectiveRunAt
 			else current.position <= effectiveRunAt
 		if alreadyReached then
-			cancelScheduled(self, attachment)
-			attachment._playback:evaluate(current)
+			cancelScheduled(self, drivenPlayback)
+			drivenPlayback._playback:evaluate(current)
 			if hasPendingClockNotification(self) then
 				return
 			end
@@ -477,37 +412,44 @@ local function scheduleNext(
 		end
 
 		local reused = false
-		if id ~= nil and attachment._scheduledDirection == direction then
-			local ok, rescheduled = pcall(self._clock.rescheduleAt, self._clock, id, effectiveRunAt, self._phase)
+		if id ~= nil and drivenPlayback._scheduledDirection == direction then
+			local ok, rescheduled =
+				pcall(self._providerClock.rescheduleAt, self._providerClock, id, effectiveRunAt, self._phase)
 			reused = ok and rescheduled == true
 			if reused then
-				attachment._scheduledSourcePosition = effectiveRunAt
+				drivenPlayback._scheduledSourcePosition = effectiveRunAt
 			end
 		end
 		if not reused then
-			cancelScheduled(self, attachment)
-			attachment._taskGeneration += 1
-			local generation = attachment._taskGeneration
-			local publicAttachment = (attachment :: unknown) :: DrivenPlayback
+			cancelScheduled(self, drivenPlayback)
+			drivenPlayback._taskGeneration += 1
+			local generation = drivenPlayback._taskGeneration
+			local publicDrivenPlayback = (drivenPlayback :: unknown) :: DrivenPlayback
 			local function reachedCallback(_now: number, actualDirection: unknown)
 				enqueueNotification(self, {
 					kind = "reached" :: "reached",
-					attachment = publicAttachment,
+					drivenPlayback = publicDrivenPlayback,
 					generation = generation,
 					direction = actualDirection,
 				})
 			end
 			local callback: ReachedCallback = reachedCallback
 			local token = if direction == "forward" then self._directions.forward else self._directions.backward
-			local ok, scheduled =
-				pcall(self._clock.bindToReached, self._clock, effectiveRunAt, token, callback, self._phase)
+			local ok, scheduled = pcall(
+				self._providerClock.bindToReached,
+				self._providerClock,
+				effectiveRunAt,
+				token,
+				callback,
+				self._phase
+			)
 			if not ok or type(scheduled) ~= "number" then
-				PlaybackModule._fail(attachment._playback, "scheduleFailed")
+				drivenPlayback._playback:fail("scheduleFailed")
 				return
 			end
-			attachment._scheduledId = scheduled
-			attachment._scheduledSourcePosition = effectiveRunAt
-			attachment._scheduledDirection = direction :: TraversalDirection
+			drivenPlayback._scheduledId = scheduled
+			drivenPlayback._scheduledSourcePosition = effectiveRunAt
+			drivenPlayback._scheduledDirection = direction :: TraversalDirection
 		end
 
 		if hasPendingClockNotification(self) then
@@ -523,8 +465,8 @@ local function scheduleNext(
 		if not passedWhileScheduling then
 			return
 		end
-		cancelScheduled(self, attachment)
-		attachment._playback:evaluate(validation)
+		cancelScheduled(self, drivenPlayback)
+		drivenPlayback._playback:evaluate(validation)
 		if hasPendingClockNotification(self) then
 			return
 		end
@@ -533,192 +475,200 @@ local function scheduleNext(
 	end
 end
 
-refreshAttachment = function(
+refreshDrivenPlayback = function(
 	self: ClockDriverImpl,
-	attachment: AttachmentImpl,
+	drivenPlayback: DrivenPlaybackImpl,
 	currentSample: TimeSample?,
 	reachedTaskFired: boolean?
 )
-	if not attachment._attached then
+	if not drivenPlayback._attached then
 		return
 	end
 	if hasPendingClockNotification(self) then
 		return
 	end
-	local status = attachment._playback:getStatus()
+	local status = drivenPlayback._playback:getStatus()
 	if status ~= "playing" then
-		cancelScheduled(self, attachment)
-		setPhaseRequired(self, attachment, false)
-		if not attachment._playback:isAlive() then
-			retireAttachment(self, attachment)
+		cancelScheduled(self, drivenPlayback)
+		setPhaseRequired(self, drivenPlayback, false)
+		if not drivenPlayback._playback:isAlive() then
+			retireDrivenPlayback(self, drivenPlayback)
 		end
 		return
 	end
-	if not attachment._active and not activateAttachment(self, attachment) then
+	if not drivenPlayback._active and not activateDrivenPlayback(self, drivenPlayback) then
 		if clockIsDestroyed(self) then
 			terminateDriver(self, "clockDestroyed")
 		else
-			PlaybackModule._fail(attachment._playback, "driverAttachFailed")
+			drivenPlayback._playback:fail("driverAttachFailed")
 		end
 		return
 	end
-	local state = PlaybackModule._getTraversalForecast(attachment._playback)
-	if not setPhaseRequired(self, attachment, state.phaseRequired) then
-		PlaybackModule._fail(attachment._playback, "phaseBindFailed")
+	local state = drivenPlayback._forecast
+	drivenPlayback._playback:writeTraversalForecastInto(state)
+	if not setPhaseRequired(self, drivenPlayback, state.phaseRequired) then
+		drivenPlayback._playback:fail("phaseBindFailed")
 		return
 	end
-	scheduleNext(self, attachment, state, currentSample, reachedTaskFired == true)
+	scheduleNext(self, drivenPlayback, state, currentSample, reachedTaskFired == true)
 end
 
-local function applyClockChangeToAttachment(
+local function applyClockChangeToDrivenPlayback(
 	self: ClockDriverImpl,
-	attachment: AttachmentImpl,
-	change: ProviderChange,
+	drivenPlayback: DrivenPlaybackImpl,
+	change: ProviderClockChange,
 	previousSample: TimeSample,
 	sample: TimeSample
 )
-	if not attachment._attached or not attachment._active or attachment._playback:getStatus() ~= "playing" then
+	if
+		not drivenPlayback._attached
+		or not drivenPlayback._active
+		or drivenPlayback._playback:getStatus() ~= "playing"
+	then
 		return
 	end
 	local previousPosition = change.previousPosition or previousSample.position
+	local scratch = self._sampleScratch
 	if change.discontinuous then
-		attachment._playback:evaluate({
-			position = previousPosition,
-			rate = previousSample.rate,
-		})
-		if attachment._playback:getStatus() ~= "playing" then
-			refreshAttachment(self, attachment, sample)
+		scratch.position, scratch.rate = previousPosition, previousSample.rate
+		drivenPlayback._playback:evaluate(scratch)
+		if drivenPlayback._playback:getStatus() ~= "playing" then
+			refreshDrivenPlayback(self, drivenPlayback, sample)
 			return
 		end
-		local target = PlaybackModule._projectSourcePosition(attachment._playback, change.currentPosition)
+		local target = drivenPlayback._playback:projectSourcePosition(change.currentPosition)
 		if target == nil then
-			refreshAttachment(self, attachment, sample)
+			refreshDrivenPlayback(self, drivenPlayback, sample)
 			return
 		end
-		if attachment._discontinuityMode == "cancel" then
-			attachment._playback:cancel("clockDiscontinuity")
+		if drivenPlayback._discontinuityMode == "cancel" then
+			drivenPlayback._playback:cancel("clockDiscontinuity")
 		else
-			PlaybackModule._acceptSourceSample(attachment._playback, {
-				position = change.currentPosition,
-				rate = sample.rate,
-			})
-			attachment._playback:seek({
+			scratch.position, scratch.rate = change.currentPosition, sample.rate
+			drivenPlayback._playback:acceptSourceSample(scratch)
+			drivenPlayback._playback:seek({
 				timePosition = target.timePosition,
 				loopIndex = target.loopIndex,
-			}, attachment._discontinuityMode)
-			if attachment._playback:getStatus() == "playing" and sample.position ~= change.currentPosition then
-				attachment._playback:evaluate(sample)
+			}, drivenPlayback._discontinuityMode)
+			if drivenPlayback._playback:getStatus() == "playing" and sample.position ~= change.currentPosition then
+				drivenPlayback._playback:evaluate(sample)
 			end
 		end
 	else
-		attachment._playback:evaluate({
-			position = previousPosition,
-			rate = sample.rate,
-		})
-		if attachment._playback:getStatus() == "playing" and change.currentPosition ~= previousPosition then
-			attachment._playback:evaluate({
-				position = change.currentPosition,
-				rate = sample.rate,
-			})
+		scratch.position, scratch.rate = previousPosition, sample.rate
+		drivenPlayback._playback:evaluate(scratch)
+		if drivenPlayback._playback:getStatus() == "playing" and change.currentPosition ~= previousPosition then
+			scratch.position, scratch.rate = change.currentPosition, sample.rate
+			drivenPlayback._playback:evaluate(scratch)
 		end
-		if attachment._playback:getStatus() == "playing" and sample.position ~= change.currentPosition then
-			attachment._playback:evaluate(sample)
+		if drivenPlayback._playback:getStatus() == "playing" and sample.position ~= change.currentPosition then
+			drivenPlayback._playback:evaluate(sample)
 		end
 	end
-	refreshAttachment(self, attachment, sample)
+	refreshDrivenPlayback(self, drivenPlayback, sample)
 end
 
-local function applyClockNotification(self: ClockDriverImpl, notification: ClockNotification)
-	local snapshot = table.clone(self._active)
-	for _, publicAttachment in snapshot do
-		if self._activeMembership[publicAttachment] ~= nil then
-			applyClockChangeToAttachment(
+local function snapshotDrivenPlaybacks(self: ClockDriverImpl, drivenPlaybacks: { DrivenPlayback }): { DrivenPlayback }
+	-- Notifications serialize dispatch, so callbacks cannot overwrite the active snapshot.
+	local snapshot = self._dispatchDrivenPlaybacks
+	table.clear(snapshot)
+	table.move(drivenPlaybacks, 1, #drivenPlaybacks, 1, snapshot)
+	return snapshot
+end
+
+local function applyClockNotification(self: ClockDriverImpl, notification: ClockDriverClockNotification)
+	local snapshot = snapshotDrivenPlaybacks(self, self._active)
+	for _, publicDrivenPlayback in snapshot do
+		if self._activeMembership[publicDrivenPlayback] ~= nil then
+			applyClockChangeToDrivenPlayback(
 				self,
-				asAttachment(publicAttachment),
+				asDrivenPlayback(publicDrivenPlayback),
 				notification.change,
 				notification.previousSample,
 				notification.sample
 			)
 		end
 	end
+	table.clear(snapshot)
 end
 
-local function applyPhaseNotification(self: ClockDriverImpl, notification: PhaseNotification)
-	local snapshot = table.clone(self._phaseAttachments)
-	for _, publicAttachment in snapshot do
-		if self._phaseMembership[publicAttachment] ~= nil then
-			local attachment = asAttachment(publicAttachment)
-			local reachedSample = attachment._reachedSample
-			attachment._reachedSample = nil
+local function applyPhaseNotification(self: ClockDriverImpl, notification: ClockDriverPhaseNotification)
+	local snapshot = snapshotDrivenPlaybacks(self, self._phaseDrivenPlaybacks)
+	for _, publicDrivenPlayback in snapshot do
+		if self._phaseMembership[publicDrivenPlayback] ~= nil then
+			local drivenPlayback = asDrivenPlayback(publicDrivenPlayback)
+			local reachedSample = drivenPlayback._reachedSample
+			drivenPlayback._reachedSample = nil
 			if
 				reachedSample == nil
 				or reachedSample.position ~= notification.sample.position
 				or reachedSample.rate ~= notification.sample.rate
 			then
-				attachment._playback:evaluate(notification.sample)
+				drivenPlayback._playback:evaluate(notification.sample)
 			end
-			refreshAttachment(self, attachment, notification.sample)
+			refreshDrivenPlayback(self, drivenPlayback, notification.sample)
 		end
 	end
+	table.clear(snapshot)
 end
 
-local function applyReachedNotification(self: ClockDriverImpl, notification: ReachedNotification)
-	local attachment = asAttachment(notification.attachment)
+local function applyReachedNotification(self: ClockDriverImpl, notification: ClockDriverReachedNotification)
+	local drivenPlayback = asDrivenPlayback(notification.drivenPlayback)
 	if
-		not attachment._attached
-		or not attachment._active
-		or attachment._taskGeneration ~= notification.generation
-		or attachment._scheduledId == nil
+		not drivenPlayback._attached
+		or not drivenPlayback._active
+		or drivenPlayback._taskGeneration ~= notification.generation
+		or drivenPlayback._scheduledId == nil
 	then
 		return
 	end
-	local scheduledDirection = attachment._scheduledDirection
+	local scheduledDirection = drivenPlayback._scheduledDirection
 	local expectedToken = if scheduledDirection == "forward"
 		then self._directions.forward
 		elseif scheduledDirection == "backward" then self._directions.backward
 		else nil
 	if expectedToken == nil or notification.direction ~= expectedToken then
-		PlaybackModule._fail(attachment._playback, "invalidReachedDirection")
+		drivenPlayback._playback:fail("invalidReachedDirection")
 		return
 	end
 	local sample = readForEvaluation(self)
 	if sample == nil then
 		return
 	end
-	attachment._playback:evaluate(sample)
-	attachment._reachedSample = sample
-	refreshAttachment(self, attachment, sample, true)
+	drivenPlayback._playback:evaluate(sample)
+	drivenPlayback._reachedSample = sample
+	refreshDrivenPlayback(self, drivenPlayback, sample, true)
 end
 
-local function applyControlNotification(self: ClockDriverImpl, notification: ControlNotification)
-	local attachment = asAttachment(notification.attachment)
-	if not attachment._attached then
+local function applyControlNotification(self: ClockDriverImpl, notification: ClockDriverControlNotification)
+	local drivenPlayback = asDrivenPlayback(notification.drivenPlayback)
+	if not drivenPlayback._attached then
 		notification.result = false
 		return
 	end
-	local playback = attachment._playback
+	local playback = drivenPlayback._playback
 	if notification.operation == "play" then
 		if playback:getStatus() ~= "idle" then
 			return
 		end
-		if not activateAttachment(self, attachment) then
+		if not activateDrivenPlayback(self, drivenPlayback) then
 			if clockIsDestroyed(self) then
 				terminateDriver(self, "clockDestroyed")
 			else
-				PlaybackModule._fail(playback, "driverAttachFailed")
+				drivenPlayback._playback:fail("driverAttachFailed")
 			end
 			return
 		end
 		local sample = readForEvaluation(self)
 		if sample ~= nil then
 			playback:play(sample)
-			refreshAttachment(self, attachment, sample)
+			refreshDrivenPlayback(self, drivenPlayback, sample)
 		end
 	elseif notification.operation == "pause" then
 		if playback:getStatus() == "playing" then
-			evaluateCurrent(self, attachment)
+			evaluateCurrent(self, drivenPlayback)
 			playback:pause()
-			refreshAttachment(self, attachment)
+			refreshDrivenPlayback(self, drivenPlayback)
 		end
 	elseif notification.operation == "resume" then
 		if playback:getStatus() == "paused" then
@@ -726,33 +676,33 @@ local function applyControlNotification(self: ClockDriverImpl, notification: Con
 			if sample ~= nil then
 				playback:resume()
 				playback:evaluate(sample)
-				refreshAttachment(self, attachment, sample)
+				refreshDrivenPlayback(self, drivenPlayback, sample)
 			end
 		end
 	elseif notification.operation == "speed" then
 		local currentSample: TimeSample? = nil
 		if playback:getStatus() == "playing" then
-			currentSample = evaluateCurrent(self, attachment)
+			currentSample = evaluateCurrent(self, drivenPlayback)
 		end
 		local speed = notification.speed
 		if speed ~= nil then
 			playback:setPlaybackSpeed(speed)
-			refreshAttachment(self, attachment, currentSample)
+			refreshDrivenPlayback(self, drivenPlayback, currentSample)
 		end
 	elseif notification.operation == "seek" then
 		local currentSample: TimeSample? = nil
 		if playback:getStatus() == "playing" then
-			currentSample = evaluateCurrent(self, attachment)
+			currentSample = evaluateCurrent(self, drivenPlayback)
 		end
 		local address = notification.address
 		local mode = notification.mode
 		if address ~= nil and mode ~= nil then
 			notification.result = playback:seek(address, mode :: AddressMode)
-			refreshAttachment(self, attachment, currentSample)
+			refreshDrivenPlayback(self, drivenPlayback, currentSample)
 		end
 	elseif notification.operation == "cleanup" then
 		if playback:getStatus() == "playing" then
-			evaluateCurrent(self, attachment)
+			evaluateCurrent(self, drivenPlayback)
 		end
 		local cleanup = notification.cleanup
 		if cleanup ~= nil then
@@ -760,23 +710,23 @@ local function applyControlNotification(self: ClockDriverImpl, notification: Con
 		end
 	elseif notification.operation == "cancel" then
 		if playback:getStatus() == "playing" then
-			evaluateCurrent(self, attachment)
+			evaluateCurrent(self, drivenPlayback)
 		end
 		if playback:isAlive() then
 			playback:cancel(notification.reason)
 		end
-	elseif notification.operation == "destroy" then
+	elseif notification.operation == "deconstruct" then
 		if playback:getStatus() == "playing" then
-			evaluateCurrent(self, attachment)
+			evaluateCurrent(self, drivenPlayback)
 		end
 		if playback:isAlive() then
-			playback:destroy()
+			playback:deconstruct()
 		end
 	elseif notification.operation == "detach" then
 		if playback:getStatus() == "playing" then
-			evaluateCurrent(self, attachment)
+			evaluateCurrent(self, drivenPlayback)
 		end
-		retireAttachment(self, attachment)
+		retireDrivenPlayback(self, drivenPlayback)
 	end
 end
 
@@ -852,6 +802,7 @@ local function notifyPhase(self: ClockDriverImpl)
 end
 
 local ClockDriver = {}
+ClockDriver.__index = ClockDriver
 
 function ClockDriver.new<PhaseInputT, DirectionTokenT>(
 	clock: ProviderClock<PhaseInputT, DirectionTokenT>,
@@ -859,7 +810,7 @@ function ClockDriver.new<PhaseInputT, DirectionTokenT>(
 	directions: DirectionTokens<DirectionTokenT>
 ): ClockDriver
 	assert(directions.forward ~= directions.backward, "Pulse direction tokens must be distinct")
-	local storedClock = (clock :: unknown) :: StoredClock
+	local storedClock = (clock :: unknown) :: StoredProviderClock
 	local storedDirections: DirectionTokens<unknown> = {
 		forward = directions.forward,
 		backward = directions.backward,
@@ -873,24 +824,26 @@ function ClockDriver.new<PhaseInputT, DirectionTokenT>(
 	end
 	self = (
 		setmetatable({
-			_clock = storedClock,
+			_providerClock = storedClock,
 			_phase = phase,
 			_directions = storedDirections,
 			_destroyed = false,
-			_attachments = {},
-			_attachmentMembership = {},
+			_drivenPlaybacks = {},
+			_drivenPlaybackMembership = {},
 			_active = {},
 			_activeMembership = {},
-			_phaseAttachments = {},
+			_phaseDrivenPlaybacks = {},
 			_phaseMembership = {},
 			_changedRelease = nil,
 			_phaseRelease = nil,
 			_changedCallback = changedCallback,
 			_phaseCallback = phaseCallback,
+			_dispatchDrivenPlaybacks = {},
 			_notifications = {},
 			_notifying = false,
 			_lastSample = { position = 0, rate = 0 },
-		}, DriverMethods) :: unknown
+			_sampleScratch = { position = 0, rate = 0 },
+		}, ClockDriver) :: unknown
 	) :: ClockDriverImpl
 	local initialSample = readClock(self)
 	assert(initialSample ~= nil, "Pulse ClockDriver requires a live scheduling-capable clock")
@@ -898,160 +851,39 @@ function ClockDriver.new<PhaseInputT, DirectionTokenT>(
 	return self
 end
 
-function DriverMethods.attach(
+function ClockDriver.attach(
 	self: ClockDriverImpl,
 	playback: Playback,
 	options: ClockDriverAttachmentOptions
 ): DrivenPlayback
 	assert(not self._destroyed, "Pulse cannot attach to a destroyed ClockDriver")
 	assert(playback:getStatus() == "idle", "Pulse ClockDriver requires an idle Playback")
-	assert(attachmentByPlayback[playback] == nil, "Pulse Playback is already attached to a ClockDriver")
-	local mode = validateDiscontinuityMode(options.discontinuityMode)
-	local attachment: AttachmentImpl
-	attachment = (
-		setmetatable({
-			_driver = self,
-			_playback = playback,
-			_discontinuityMode = mode,
-			_attached = true,
-			_active = false,
-			_scheduledId = nil,
-			_scheduledSourcePosition = nil,
-			_scheduledDirection = nil,
-			_taskGeneration = 0,
-			_reachedSample = nil,
-			_endedRelease = nil,
-		}, DrivenMethods) :: unknown
-	) :: AttachmentImpl
-	local publicAttachment = (attachment :: unknown) :: DrivenPlayback
-	attachment._endedRelease = playback:onEnded(function()
-		retireAttachment(self, attachment)
+	assert(drivenPlaybackByPlayback[playback] == nil, "Pulse Playback is already attached to a ClockDriver")
+	local mode: DriverDiscontinuityMode = validateDiscontinuityMode(options.discontinuityMode)
+	local drivenPlayback = DrivenPlayback.new(self, (playback :: unknown) :: PlaybackDriven, mode)
+	local publicDrivenPlayback = (drivenPlayback :: unknown) :: DrivenPlayback
+	drivenPlayback._endedRelease = playback:onEnded(function()
+		retireDrivenPlayback(self, drivenPlayback)
 	end)
-	table.insert(self._attachments, publicAttachment)
-	self._attachmentMembership[publicAttachment] = true
-	attachmentByPlayback[playback] = attachment
-	return publicAttachment
+	table.insert(self._drivenPlaybacks, publicDrivenPlayback)
+	self._drivenPlaybackMembership[publicDrivenPlayback] = true
+	drivenPlaybackByPlayback[playback] = drivenPlayback
+	return publicDrivenPlayback
 end
 
-function DriverMethods.destroy(self: ClockDriverImpl)
+function ClockDriver.submitControl(self: ClockDriverImpl, notification: ClockDriverControlNotification)
+	enqueueNotification(self, notification)
+end
+
+function ClockDriver.deconstruct(self: ClockDriverImpl)
 	terminateDriver(self, "driverDestroyed")
 end
 
-function DriverMethods.isDestroyed(self: ClockDriverImpl): boolean
+function ClockDriver.isDestroyed(self: ClockDriverImpl): boolean
 	if not self._destroyed and clockIsDestroyed(self) then
 		terminateDriver(self, "clockDestroyed")
 	end
 	return self._destroyed
-end
-
-local function control(self: AttachmentImpl, operation: ControlKind): ControlNotification
-	local notification: ControlNotification = {
-		kind = "control" :: "control",
-		attachment = (self :: unknown) :: DrivenPlayback,
-		operation = operation,
-		result = nil,
-	}
-	enqueueNotification(asDriver(self._driver), notification)
-	return notification
-end
-
-function DrivenMethods.play(self: AttachmentImpl): DrivenPlayback
-	control(self, "play" :: ControlKind)
-	return self
-end
-
-function DrivenMethods.pause(self: AttachmentImpl)
-	control(self, "pause" :: ControlKind)
-end
-
-function DrivenMethods.resume(self: AttachmentImpl)
-	control(self, "resume" :: ControlKind)
-end
-
-function DrivenMethods.setPlaybackSpeed(self: AttachmentImpl, speed: number)
-	assert(isFinite(speed), "Pulse playbackSpeed must be finite")
-	local notification: ControlNotification = {
-		kind = "control" :: "control",
-		attachment = (self :: unknown) :: DrivenPlayback,
-		operation = "speed" :: ControlKind,
-		speed = speed,
-	}
-	enqueueNotification(asDriver(self._driver), notification)
-end
-
-function DrivenMethods.getPlaybackSpeed(self: AttachmentImpl): number
-	return self._playback:getPlaybackSpeed()
-end
-
-function DrivenMethods.seek(self: AttachmentImpl, address: SequenceAddress, mode: AddressMode): boolean
-	local validatedAddress = PlaybackModule._validateAddress(self._playback, address)
-	local validatedMode: AddressMode = validateAddressMode(mode)
-	local notification: ControlNotification = {
-		kind = "control" :: "control",
-		attachment = (self :: unknown) :: DrivenPlayback,
-		operation = "seek" :: ControlKind,
-		address = {
-			timePosition = validatedAddress.timePosition,
-			loopIndex = validatedAddress.loopIndex,
-		},
-		mode = validatedMode,
-		result = self._attached and self._playback:isAlive(),
-	}
-	enqueueNotification(asDriver(self._driver), notification)
-	return notification.result == true
-end
-
-function DrivenMethods.getPosition(self: AttachmentImpl): PlaybackPosition
-	return self._playback:getPosition()
-end
-
-function DrivenMethods.getStatus(self: AttachmentImpl): Status
-	return self._playback:getStatus()
-end
-
-function DrivenMethods.addCleanup(self: AttachmentImpl, cleanup: () -> ())
-	assert(type(cleanup) == "function", "Pulse cleanup must be a callback")
-	enqueueNotification(asDriver(self._driver), {
-		kind = "control" :: "control",
-		attachment = (self :: unknown) :: DrivenPlayback,
-		operation = "cleanup" :: ControlKind,
-		cleanup = cleanup,
-	})
-end
-
-function DrivenMethods.cancel(self: AttachmentImpl, reason: string?)
-	local notification: ControlNotification = {
-		kind = "control" :: "control",
-		attachment = (self :: unknown) :: DrivenPlayback,
-		operation = "cancel" :: ControlKind,
-		reason = reason,
-	}
-	enqueueNotification(asDriver(self._driver), notification)
-end
-
-function DrivenMethods.destroy(self: AttachmentImpl)
-	control(self, "destroy" :: ControlKind)
-end
-
-function DrivenMethods.onEnded(self: AttachmentImpl, callback: EndedCallback): Release
-	return self._playback:onEnded(callback)
-end
-
-function DrivenMethods.onLooped(self: AttachmentImpl, callback: LoopedCallback): Release
-	return self._playback:onLooped(callback)
-end
-
-function DrivenMethods.isAlive(self: AttachmentImpl): boolean
-	return self._playback:isAlive()
-end
-
-function DrivenMethods.getCompletion(self: AttachmentImpl): Completion?
-	return self._playback:getCompletion()
-end
-
-function DrivenMethods.detach(self: AttachmentImpl): Playback
-	control(self, "detach" :: ControlKind)
-	return self._playback
 end
 
 local module: ClockDriverModule = {

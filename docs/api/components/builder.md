@@ -1,6 +1,6 @@
-# Components / Builder
+# Components / SequenceBuilder
 
-<div class="api-path">src/pulse/components/sequence/shared/sequence/builder.luau</div>
+<div class="api-path">src/pulse/components/sequence/shared/sequenceBuilder.luau</div>
 
 <div class="api-meta">
   <span class="api-badge api-badge--public">Public authoring helper</span>
@@ -8,24 +8,24 @@
 </div>
 
 <a id="builder"></a>
-## Builder
+## SequenceBuilder
 
 ```luau
-type Builder<ContextT> = {
-	duration: (self: Builder<ContextT>, seconds: number) -> Builder<ContextT>,
-	loop: (self: Builder<ContextT>, enabled: boolean?) -> Builder<ContextT>,
-	event: (self: Builder<ContextT>, event: Event<ContextT>) -> Builder<ContextT>,
-	sample: (self: Builder<ContextT>, sample: Sample<ContextT>) -> Builder<ContextT>,
-	onPlay: (self: Builder<ContextT>, callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>,
+type SequenceBuilder<ContextT> = {
+	duration: (self: SequenceBuilder<ContextT>, seconds: number) -> SequenceBuilder<ContextT>,
+	loop: (self: SequenceBuilder<ContextT>, enabled: boolean?) -> SequenceBuilder<ContextT>,
+	event: (self: SequenceBuilder<ContextT>, event: Event<ContextT>) -> SequenceBuilder<ContextT>,
+	sample: (self: SequenceBuilder<ContextT>, sample: Sample<ContextT>) -> SequenceBuilder<ContextT>,
+	onPlay: (self: SequenceBuilder<ContextT>, callback: (PlaybackControl, ContextT) -> ()) -> SequenceBuilder<ContextT>,
 	onAddress: (
-		self: Builder<ContextT>,
+		self: SequenceBuilder<ContextT>,
 		callback: (PlaybackControl, AddressInfo, ContextT) -> ()
-	) -> Builder<ContextT>,
+	) -> SequenceBuilder<ContextT>,
 	onLoop: (
-		self: Builder<ContextT>,
+		self: SequenceBuilder<ContextT>,
 		callback: (PlaybackControl, LoopChange, ContextT) -> ()
-	) -> Builder<ContextT>,
-	compile: (self: Builder<ContextT>) -> Sequence<ContextT>,
+	) -> SequenceBuilder<ContextT>,
+	compile: (self: SequenceBuilder<ContextT>) -> Sequence<ContextT>,
 }
 ```
 
@@ -46,7 +46,7 @@ type Builder<ContextT> = {
 ## Pulse.builder
 
 ```luau
-Pulse.builder<ContextT>() -> Builder<ContextT>
+Pulse.builder<ContextT>() -> SequenceBuilder<ContextT>
 ```
 
 Creates an empty builder with looping disabled. Address behavior is intentionally absent: callers
@@ -54,85 +54,85 @@ select it when creating or seeking a Playback. Luau infers the parameterless gen
 from its expected type:
 
 ```luau
-local builder: Pulse.Builder<PresentationContext> = Pulse.builder()
+local builder: Pulse.SequenceBuilder<PresentationContext> = Pulse.builder()
 ```
 
 <a id="builder-duration"></a>
-### Builder:duration
+### SequenceBuilder:duration
 
 ```luau
-Builder<ContextT>:duration(seconds: number) -> Builder<ContextT>
+SequenceBuilder<ContextT>:duration(seconds: number) -> SequenceBuilder<ContextT>
 ```
 
-Sets the required finite sequence duration and returns the same Builder. It must be nonnegative;
+Sets the required finite sequence duration and returns the same SequenceBuilder. It must be nonnegative;
 zero is valid only for a non-looping Sequence.
 
 <a id="builder-loop"></a>
-### Builder:loop
+### SequenceBuilder:loop
 
 ```luau
-Builder<ContextT>:loop(enabled: boolean?) -> Builder<ContextT>
+SequenceBuilder<ContextT>:loop(enabled: boolean?) -> SequenceBuilder<ContextT>
 ```
 
 Enables looping when omitted or `true`, and disables it when `false`.
 
 <a id="builder-event"></a>
-### Builder:event
+### SequenceBuilder:event
 
 ```luau
-Builder<ContextT>:event(event: Event<ContextT>) -> Builder<ContextT>
+SequenceBuilder<ContextT>:event(event: Event<ContextT>) -> SequenceBuilder<ContextT>
 ```
 
 Copies and appends an event. Compilation preserves authored order for equal times.
 
 <a id="builder-sample"></a>
-### Builder:sample
+### SequenceBuilder:sample
 
 ```luau
-Builder<ContextT>:sample(sample: Sample<ContextT>) -> Builder<ContextT>
+SequenceBuilder<ContextT>:sample(sample: Sample<ContextT>) -> SequenceBuilder<ContextT>
 ```
 
 Copies and appends an absolute sampled interval. Samples describe state at the final position; they
 do not integrate a delta.
 
 <a id="builder-on-play"></a>
-### Builder:onPlay
+### SequenceBuilder:onPlay
 
 ```luau
-Builder<ContextT>:onPlay(callback: (PlaybackControl, ContextT) -> ()) -> Builder<ContextT>
+SequenceBuilder<ContextT>:onPlay(callback: (PlaybackControl, ContextT) -> ()) -> SequenceBuilder<ContextT>
 ```
 
 Sets the callback that opens the initial generation and every reconstructed generation.
 
 <a id="builder-on-address"></a>
-### Builder:onAddress
+### SequenceBuilder:onAddress
 
 ```luau
-Builder<ContextT>:onAddress(
+SequenceBuilder<ContextT>:onAddress(
 	callback: (PlaybackControl, AddressInfo, ContextT) -> ()
-) -> Builder<ContextT>
+) -> SequenceBuilder<ContextT>
 ```
 
 Sets the callback that materializes host-owned state after an initial placement or explicit seek
 has established its exact target.
 
 <a id="builder-on-loop"></a>
-### Builder:onLoop
+### SequenceBuilder:onLoop
 
 ```luau
-Builder<ContextT>:onLoop(
+SequenceBuilder<ContextT>:onLoop(
 	callback: (PlaybackControl, LoopChange, ContextT) -> ()
-) -> Builder<ContextT>
+) -> SequenceBuilder<ContextT>
 ```
 
 Sets the authored loop callback. It runs before callbacks registered with `Playback:onLooped`.
 
 <a id="builder-compile"></a>
-### Builder:compile
+### SequenceBuilder:compile
 
 ```luau
-Builder<ContextT>:compile() -> Sequence<ContextT>
+SequenceBuilder<ContextT>:compile() -> Sequence<ContextT>
 ```
 
-Validates the accumulated definition and returns a frozen reusable Sequence. The Builder remains a
+Validates the accumulated definition and returns a frozen reusable Sequence. The SequenceBuilder remains a
 mutable authoring object; do not mutate it concurrently while compiling.

@@ -18,7 +18,7 @@ type HitContext = {
 	worldPosition: Vector3,
 }
 
-local builder: Pulse.Builder<HitContext> = Pulse.builder()
+local builder: Pulse.SequenceBuilder<HitContext> = Pulse.builder()
 local sequence = builder
 	:duration(1.5)
 	:event({
