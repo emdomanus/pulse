@@ -75,8 +75,8 @@ without retaining or cloning the table. It may be reused or mutated immediately 
 
 ```luau
 type SequenceAddress = {
-	timePosition: number,
-	loopIndex: number?,
+	read timePosition: number,
+	read loopIndex: number?,
 }
 ```
 
@@ -105,13 +105,26 @@ type PlaybackPosition = {
 
 Public reads return new records; callback records freeze nested positions.
 
+<a id="playback-position-snapshot"></a>
+## PlaybackPositionSnapshot
+
+```luau
+type PlaybackPositionSnapshot = {
+    read timePosition: number,
+    read loopIndex: number,
+    read unwrappedTimePosition: number,
+}
+```
+
+The frozen position view used by callback payloads.
+
 <a id="sample-info"></a>
 ## SampleInfo
 
 ```luau
 type SampleInfo = {
-	position: PlaybackPosition,
-	rate: number,
+	read position: PlaybackPositionSnapshot,
+	read rate: number,
 }
 ```
 
@@ -124,10 +137,10 @@ be zero. There is intentionally no delta field.
 
 ```luau
 type AddressInfo = {
-	cause: AddressCause,
-	mode: AddressMode,
-	from: PlaybackPosition?,
-	target: PlaybackPosition,
+	read cause: AddressCause,
+	read mode: AddressMode,
+	read from: PlaybackPositionSnapshot?,
+	read target: PlaybackPositionSnapshot,
 }
 ```
 
@@ -140,9 +153,9 @@ and authored-boundary identity.
 
 ```luau
 type LoopChange = {
-	fromLoopIndex: number,
-	toLoopIndex: number,
-	direction: TraversalDirection,
+	read fromLoopIndex: number,
+	read toLoopIndex: number,
+	read direction: TraversalDirection,
 }
 ```
 
@@ -178,10 +191,18 @@ type Status = ActiveStatus | TerminalStatus
 
 ```luau
 type Completion = {
-	status: TerminalStatus,
-	reason: string?,
+	read status: TerminalStatus,
+	read reason: string?,
 }
 ```
 
 The single frozen terminal result retained by Playback. The reason may be supplied by a host
 cancellation or by a deterministic core/driver failure.
+
+## Mutable outputs and frozen payloads
+
+`PlaybackPosition` is writable and remains the output buffer for `writePositionInto`.
+`PlaybackPositionSnapshot` has the same coordinates with read-only fields and is used by
+`SampleInfo.position` and `AddressInfo.from`/`target`. `SampleInfo`, `AddressInfo`, `LoopChange`,
+and `Completion` are frozen callback records; their fields are read-only in the type surface.
+`SequenceAddress` is a read-only input view. Public object methods cannot be reassigned.

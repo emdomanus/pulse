@@ -47,7 +47,7 @@ export type ClockDriverControlNotification<AttachmentT> = {
 	speed: number?,
 	address: SequenceAddress?,
 	mode: AddressMode?,
-	cleanup: (() -> ())?,
+	read cleanup: (() -> ())?,
 	reason: string?,
 	result: boolean?,
 }

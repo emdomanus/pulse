@@ -12,7 +12,8 @@ type PresentationContext = {
 	camera: Camera,
 }
 
-local builder: Pulse.SequenceBuilder<PresentationContext> = Pulse.builder()
+local makeBuilder = Pulse.builder :: () -> Pulse.SequenceBuilder<PresentationContext>
+local builder = makeBuilder()
 local sequence = builder
 	:duration(1.2)
 	:event({

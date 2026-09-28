@@ -16,8 +16,8 @@ export type TimeSample = {
 }
 
 export type SequenceAddress = {
-	timePosition: number,
-	loopIndex: number?,
+	read timePosition: number,
+	read loopIndex: number?,
 }
 
 export type PlaybackPosition = {
@@ -26,27 +26,34 @@ export type PlaybackPosition = {
 	unwrappedTimePosition: number,
 }
 
+-- Callback payloads are frozen; writePositionInto still accepts mutable PlaybackPosition.
+export type PlaybackPositionSnapshot = {
+	read timePosition: number,
+	read loopIndex: number,
+	read unwrappedTimePosition: number,
+}
+
 export type SampleInfo = {
-	position: PlaybackPosition,
-	rate: number,
+	read position: PlaybackPositionSnapshot,
+	read rate: number,
 }
 
 export type AddressInfo = {
-	cause: AddressCause,
-	mode: AddressMode,
-	from: PlaybackPosition?,
-	target: PlaybackPosition,
+	read cause: AddressCause,
+	read mode: AddressMode,
+	read from: PlaybackPositionSnapshot?,
+	read target: PlaybackPositionSnapshot,
 }
 
 export type LoopChange = {
-	fromLoopIndex: number,
-	toLoopIndex: number,
-	direction: TraversalDirection,
+	read fromLoopIndex: number,
+	read toLoopIndex: number,
+	read direction: TraversalDirection,
 }
 
 export type Completion = {
-	status: TerminalStatus,
-	reason: string?,
+	read status: TerminalStatus,
+	read reason: string?,
 }
 
 return {}

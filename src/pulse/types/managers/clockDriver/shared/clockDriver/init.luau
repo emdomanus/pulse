@@ -39,9 +39,9 @@ export type ClockDriverAttachmentOptions = {
 }
 
 export type ClockDriver = {
-	attach: (self: ClockDriver, playback: Playback, options: ClockDriverAttachmentOptions) -> DrivenPlayback,
-	deconstruct: (self: ClockDriver) -> (),
-	isDestroyed: (self: ClockDriver) -> boolean,
+	read attach: (self: ClockDriver, playback: Playback, options: ClockDriverAttachmentOptions) -> DrivenPlayback,
+	read deconstruct: (self: ClockDriver) -> (),
+	read isDestroyed: (self: ClockDriver) -> boolean,
 }
 
 export type ClockDriverImpl = ClockDriver & ClockDriverCommands<DrivenPlayback> & {

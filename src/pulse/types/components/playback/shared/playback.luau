@@ -75,12 +75,12 @@ export type TerminalRequest = {
 export type BoundaryState = "before" | "after" | "forwardJoinPending" | "backwardJoinPending"
 
 export type Playback = PlaybackControl & {
-	play: (self: Playback, sample: TimeSample) -> Playback,
-	evaluate: (self: Playback, sample: TimeSample) -> boolean,
-	onEnded: (self: Playback, callback: EndedCallback) -> Release,
-	onLooped: (self: Playback, callback: LoopedCallback) -> Release,
-	isAlive: (self: Playback) -> boolean,
-	getCompletion: (self: Playback) -> Completion?,
+	read play: (self: Playback, sample: TimeSample) -> Playback,
+	read evaluate: (self: Playback, sample: TimeSample) -> boolean,
+	read onEnded: (self: Playback, callback: EndedCallback) -> Release,
+	read onLooped: (self: Playback, callback: LoopedCallback) -> Release,
+	read isAlive: (self: Playback) -> boolean,
+	read getCompletion: (self: Playback) -> Completion?,
 }
 
 export type PlaybackDriven = Playback & PlaybackDriver

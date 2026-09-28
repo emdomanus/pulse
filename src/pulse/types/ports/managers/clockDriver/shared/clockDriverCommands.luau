@@ -7,7 +7,7 @@ local ClockDriverNotifications =
 type ClockDriverControlNotification<AttachmentT> = ClockDriverNotifications.ClockDriverControlNotification<AttachmentT>
 
 export type ClockDriverCommands<AttachmentT> = {
-	submitControl: (
+	read submitControl: (
 		self: ClockDriverCommands<AttachmentT>,
 		notification: ClockDriverControlNotification<AttachmentT>
 	) -> (),

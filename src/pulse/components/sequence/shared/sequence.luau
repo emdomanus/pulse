@@ -68,7 +68,7 @@ end
 local function compileEvents<ContextT>(definition: SequenceDefinition<ContextT>): { CompiledEvent<ContextT> }
 	local source: { Event<ContextT> } = definition.events or {}
 	assertDenseArray(source, "events")
-	local events: { CompiledEvent<ContextT> } = table.create(#source)
+	local events: { CompiledEvent<ContextT> } = table.create(#source) :: { CompiledEvent<ContextT> }
 	for authorIndex, event in source do
 		assertFinite(event.time, `event #{authorIndex} time`)
 		assert(
@@ -95,7 +95,7 @@ end
 local function compileSamples<ContextT>(definition: SequenceDefinition<ContextT>): { CompiledSample<ContextT> }
 	local source: { Sample<ContextT> } = definition.samples or {}
 	assertDenseArray(source, "samples")
-	local samples: { CompiledSample<ContextT> } = table.create(#source)
+	local samples: { CompiledSample<ContextT> } = table.create(#source) :: { CompiledSample<ContextT> }
 	for authorIndex, sample in source do
 		local startTime = sample.startTime or 0
 		local endTime = if sample.endTime == nil then definition.duration else sample.endTime

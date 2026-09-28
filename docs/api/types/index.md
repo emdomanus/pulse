@@ -18,6 +18,7 @@ type ClockDriver = Pulse.ClockDriver
 - [TimeSample](./definitions.md#time-sample)
 - [SequenceAddress](./definitions.md#sequence-address)
 - [PlaybackPosition](./definitions.md#playback-position)
+- [PlaybackPositionSnapshot](./definitions.md#playback-position-snapshot)
 - [SampleInfo](./definitions.md#sample-info)
 - [AddressInfo](./definitions.md#address-info)
 - [LoopChange](./definitions.md#loop-change)

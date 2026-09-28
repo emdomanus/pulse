@@ -22,6 +22,7 @@ export type AddressCause = PlaybackVocabulary.AddressCause
 export type TimeSample = PlaybackDefinitions.TimeSample
 export type SequenceAddress = PlaybackDefinitions.SequenceAddress
 export type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
+export type PlaybackPositionSnapshot = PlaybackDefinitions.PlaybackPositionSnapshot
 export type SampleInfo = PlaybackDefinitions.SampleInfo
 export type AddressInfo = PlaybackDefinitions.AddressInfo
 export type LoopChange = PlaybackDefinitions.LoopChange

@@ -176,7 +176,9 @@ local function createButton(parent: Instance, name: string, text: string, callba
 	addCorner(button, 8)
 	addStroke(button, COLORS.border, 0.65)
 	addTextConstraint(button, 9, 15)
-	button.Activated:Connect(callback)
+	button.Activated:Connect(function(_input: InputObject, _count: number)
+		callback()
+	end)
 	return button
 end
 

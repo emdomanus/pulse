@@ -11,17 +11,17 @@ type Status = PlaybackVocabulary.Status
 type AddressMode = PlaybackVocabulary.AddressMode
 
 export type PlaybackControl = {
-	pause: (self: PlaybackControl) -> (),
-	resume: (self: PlaybackControl) -> (),
-	setPlaybackSpeed: (self: PlaybackControl, speed: number) -> (),
-	getPlaybackSpeed: (self: PlaybackControl) -> number,
-	seek: (self: PlaybackControl, address: SequenceAddress, mode: AddressMode) -> boolean,
-	getPosition: (self: PlaybackControl) -> PlaybackPosition,
-	writePositionInto: (self: PlaybackControl, output: PlaybackPosition) -> (),
-	getStatus: (self: PlaybackControl) -> Status,
-	addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),
-	cancel: (self: PlaybackControl, reason: string?) -> (),
-	deconstruct: (self: PlaybackControl) -> (),
+	read pause: (self: PlaybackControl) -> (),
+	read resume: (self: PlaybackControl) -> (),
+	read setPlaybackSpeed: (self: PlaybackControl, speed: number) -> (),
+	read getPlaybackSpeed: (self: PlaybackControl) -> number,
+	read seek: (self: PlaybackControl, address: SequenceAddress, mode: AddressMode) -> boolean,
+	read getPosition: (self: PlaybackControl) -> PlaybackPosition,
+	read writePositionInto: (self: PlaybackControl, output: PlaybackPosition) -> (),
+	read getStatus: (self: PlaybackControl) -> Status,
+	read addCleanup: (self: PlaybackControl, cleanup: () -> ()) -> (),
+	read cancel: (self: PlaybackControl, reason: string?) -> (),
+	read deconstruct: (self: PlaybackControl) -> (),
 }
 
 return {}

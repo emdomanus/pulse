@@ -72,7 +72,10 @@ A changed callback must receive:
 sample is used. Extra provider fields are ignored. In particular, ClockDriver does not require or
 filter a provider revision; its own notification queue defines delivery order.
 
-The provider is borrowed. Pulse never calls a provider destroy method.
+The provider is borrowed. Pulse never calls a provider destroy method. Bind concrete provider
+methods through a host adapter when their recursive self type differs from this port.
+Modern Tempo also needs its argument-free invalidations adapted to change records; see
+[Tempo integration](../../guides/tempo-integration.md).
 
 <a id="direction-tokens"></a>
 ## DirectionTokens

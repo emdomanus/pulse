@@ -5,13 +5,13 @@ type FileSystem = {
 	readDir: (path: string) -> { string },
 	isDir: (path: string) -> boolean,
 	isFile: (path: string) -> boolean,
-	removeDir: (path: string) -> (),
 	writeDir: (path: string) -> (),
 	readFile: (path: string) -> string,
 	writeFile: (path: string, contents: string) -> (),
 }
 type Process = {
 	cwd: string,
+	env: { [string]: string },
 }
 
 local requireUnknown = (require :: unknown) :: RequireUnknown
@@ -29,6 +29,7 @@ export type TransformHandle = {
 }
 
 local Transform = {}
+local runtimeSequence = 0
 
 local function normalizePath(path: string): string
 	return (path:gsub("\\", "/"))
@@ -111,12 +112,13 @@ end
 
 function Transform.write(options: TransformOptions): TransformHandle
 	local packageRoot = resolveFromCwd(options.packageRoot)
-	local tempRoot = resolveFromCwd(options.tempDir)
+	local ownedRoot = assert(process.env.PULSE_LUNE_RUNTIME, "Run through scripts/verify/tests.ps1")
+	runtimeSequence += 1
+	local label = options.tempDir:gsub("[^%w_-]", "-")
+	local tempRoot = joinPath(ownedRoot, label .. "-" .. tostring(runtimeSequence))
 	local packageFiles = discoverFiles(packageRoot)
 	local fileSet: { [string]: true } = {}
-	if fs.isDir(tempRoot) then
-		fs.removeDir(tempRoot)
-	end
+	assert(not fs.isDir(tempRoot), "owned module runtime must be unique")
 	fs.writeDir(tempRoot)
 	for _, relative in packageFiles do
 		fileSet[relative] = true
@@ -139,9 +141,7 @@ function Transform.write(options: TransformOptions): TransformHandle
 			return requireUnknown(joinPath(tempRoot, relativePath))
 		end,
 		cleanup = function()
-			if fs.isDir(tempRoot) then
-				fs.removeDir(tempRoot)
-			end
+			-- The guarded runner owns protected cleanup of this entire run.
 		end,
 	}
 end

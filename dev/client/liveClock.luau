@@ -4,7 +4,7 @@ export type Release = () -> ()
 export type Phase = "heartbeat"
 export type DirectionName = "forward" | "backward"
 export type DirectionToken = {
-	name: DirectionName,
+	read name: DirectionName,
 }
 
 export type ClockSample = {

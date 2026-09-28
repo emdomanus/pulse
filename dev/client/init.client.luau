@@ -35,7 +35,30 @@ type EventDirection = AtomStage.EventDirection
 local player = Players.LocalPlayer
 local clock = LiveClock.new()
 local phase: LiveClock.Phase = "heartbeat"
-local driver = Pulse.clockDriver(clock, phase, clock.directions)
+local provider: Pulse.ProviderClock<LiveClock.Phase, LiveClock.DirectionToken> = {
+	read = function()
+		return clock:read()
+	end,
+	bindToChanged = function(_, callback, initially)
+		return clock:bindToChanged(callback, initially)
+	end,
+	isDestroyed = function()
+		return clock:isDestroyed()
+	end,
+	bindToReached = function(_, position, direction, callback, targetPhase)
+		return clock:bindToReached(position, direction, callback, targetPhase)
+	end,
+	cancel = function(_, id)
+		return clock:cancel(id)
+	end,
+	rescheduleAt = function(_, id, position, targetPhase)
+		return clock:rescheduleAt(id, position, targetPhase)
+	end,
+	bindPhase = function(_, targetPhase, callback)
+		return clock:bindPhase(targetPhase, callback)
+	end,
+}
+local driver = Pulse.clockDriver(provider, phase, clock.directions)
 
 local activePlayback: Playback? = nil
 local activeScenario: Scenario? = nil
@@ -76,7 +99,8 @@ local function runEvent(label: string, marker: string, direction: EventDirection
 end
 
 local function createScenarioSequence(label: string, looping: boolean): Sequence
-	local builder: Pulse.SequenceBuilder<nil> = Pulse.builder()
+	local makeBuilder = Pulse.builder :: () -> Pulse.SequenceBuilder<nil>
+	local builder = makeBuilder()
 	return builder
 		:duration(6)
 		:loop(looping)
@@ -253,7 +277,8 @@ local function seekTo(timePosition: number, loopOffset: number?)
 		return
 	end
 	local current = playback:getPosition()
-	local address: Pulse.SequenceAddress = {
+	local address = {
+		loopIndex = nil :: number?,
 		timePosition = math.clamp(timePosition, 0, scenario.sequence:getDuration()),
 	}
 	if scenario.looping then

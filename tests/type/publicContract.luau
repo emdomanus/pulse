@@ -66,7 +66,7 @@ local function proveCoreContract(): Pulse.Completion?
 				run = function(playback: Pulse.PlaybackControl, sample: Pulse.SampleInfo, context: InvocationContext)
 					local _status: Pulse.Status = playback:getStatus()
 					local _rate: number = sample.rate
-					local _position: Pulse.PlaybackPosition = sample.position
+					local _position: Pulse.PlaybackPositionSnapshot = sample.position
 					local _actorId: number = context.actorId
 				end,
 			},
@@ -74,7 +74,7 @@ local function proveCoreContract(): Pulse.Completion?
 		onAddress = function(playback, info, context)
 			local _cause: Pulse.AddressCause = info.cause
 			local _mode: Pulse.AddressMode = info.mode
-			local _target: Pulse.PlaybackPosition = info.target
+			local _target: Pulse.PlaybackPositionSnapshot = info.target
 			local _actorId: number = context.actorId
 			local _status: Pulse.Status = playback:getStatus()
 		end,
@@ -106,9 +106,33 @@ local function proveDriverContract(
 	provider: Provider,
 	directions: Pulse.DirectionTokens<DirectionToken>
 ): Pulse.DrivenPlayback
-	local structuralProvider: Pulse.ProviderClock<Phase, DirectionToken> = provider
-	local driver: Pulse.ClockDriver = Pulse.clockDriver(structuralProvider, "presentation", directions)
-	local sequence: Pulse.Sequence<nil> = Pulse.sequence({ duration = 1 })
+	-- Bind a concrete provider at the host boundary; the adapter owns no clock.
+	local structuralProvider: Pulse.ProviderClock<Phase, DirectionToken> = {
+		read = function()
+			return provider:read()
+		end,
+		bindToChanged = function(_, callback, initially)
+			return provider:bindToChanged(callback, initially)
+		end,
+		isDestroyed = function()
+			return provider:isDestroyed()
+		end,
+		bindToReached = function(_, position, direction, callback, phase)
+			return provider:bindToReached(position, direction, callback, phase)
+		end,
+		cancel = function(_, id)
+			return provider:cancel(id)
+		end,
+		rescheduleAt = function(_, id, position, phase)
+			return provider:rescheduleAt(id, position, phase)
+		end,
+		bindPhase = function(_, phase, callback)
+			return provider:bindPhase(phase, callback)
+		end,
+	}
+	local driver: Pulse.ClockDriver = Pulse.clockDriver(structuralProvider, "presentation" :: Phase, directions)
+	local definition: Pulse.SequenceDefinition<nil> = { duration = 1 }
+	local sequence: Pulse.Sequence<nil> = Pulse.sequence(definition)
 	local playback = Pulse.playback(sequence, nil)
 	local driven = driver:attach(playback, {
 		discontinuityMode = "skip",
@@ -122,7 +146,8 @@ local function proveDriverContract(
 end
 
 local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
-	local builder: Pulse.SequenceBuilder<InvocationContext> = Pulse.builder()
+	local makeBuilder = Pulse.builder :: () -> Pulse.SequenceBuilder<InvocationContext>
+	local builder = makeBuilder()
 	return builder
 		:duration(1)
 		:loop()

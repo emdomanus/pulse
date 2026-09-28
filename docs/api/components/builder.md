@@ -54,7 +54,8 @@ select it when creating or seeking a Playback. Luau infers the parameterless gen
 from its expected type:
 
 ```luau
-local builder: Pulse.SequenceBuilder<PresentationContext> = Pulse.builder()
+local makeBuilder = Pulse.builder :: () -> Pulse.SequenceBuilder<PresentationContext>
+local builder = makeBuilder()
 ```
 
 <a id="builder-duration"></a>

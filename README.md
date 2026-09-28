@@ -18,7 +18,8 @@ type HitContext = {
 	worldPosition: Vector3,
 }
 
-local builder: Pulse.SequenceBuilder<HitContext> = Pulse.builder()
+local makeBuilder = Pulse.builder :: () -> Pulse.SequenceBuilder<HitContext>
+local builder = makeBuilder()
 local sequence = builder
 	:duration(1.5)
 	:event({
@@ -55,7 +56,8 @@ used for direction and reported to active samplers after local speed is applied.
 ```luau
 local Tempo = require(ReplicatedStorage.packages.tempo)
 
-local driver = Pulse.clockDriver(clock, runtime.phases.heartbeat, {
+-- tempoProvider is the host adapter in docs/guides/tempo-integration.md.
+local driver = Pulse.clockDriver(tempoProvider(clock), "heartbeat" :: "heartbeat", {
 	forward = Tempo.Enums.Direction.forward,
 	backward = Tempo.Enums.Direction.backward,
 })
@@ -81,7 +83,7 @@ no such decision.
 For late materialization, choose `initialMode = "skip"` and use `onAddress` to establish host-owned
 resources at the exact addressed position without replaying historical one-shot events.
 
-Pulse has no package dependency on Tempo. A Tempo Clock is one structural provider; any
+Pulse has no package dependency on Tempo. A Tempo scheduling binding can be adapted at the host boundary; any
 scheduling-capable clock satisfying `ProviderClock` may be injected. Destroying a driver never
 destroys its borrowed clock.
 
@@ -104,3 +106,28 @@ npm run docs:build
 Start with the [documentation overview](./docs/index.md), the
 [getting-started guide](./docs/guides/getting-started.md), or the
 [API reference](./docs/api/index.md).
+
+## Solver V2 verification
+
+CLI and editor use Luau solver V2 with pinned Luau-LSP 1.70.1. Public methods and frozen callback
+payloads are read-only. `PlaybackPositionSnapshot` describes frozen callback positions;
+`PlaybackPosition` remains writable for `writePositionInto` and caller-owned position copies.
+`SequenceAddress` is an input view; build a mutable local record before passing it if needed.
+Parameterless generic builders use a concrete constructor specialization as shown above.
+
+```powershell
+./scripts/verify/analyze.ps1
+./scripts/verify/analyze.ps1 -Project dev.project.json -Sourcemap dev-sourcemap.json -Paths src,dev
+./scripts/verify/type-errors.ps1 -OutDir .verification/type-errors-fresh
+./scripts/verify/tooling-tests.ps1
+./scripts/verify/test-harness.ps1
+```
+
+`LUAU_LSP_OVERRIDE` can select a patched executable matching the pin. Captures in `.verification/`
+record path, version, SHA-256, definitions hash, native exit, and both output streams. Source and
+accepted public contracts form the static gate; dynamic Lune fixtures run as behavior proofs.
+Negative contracts must fail at their marked expressions without unexpected diagnostics.
+
+Tests and benchmarks use unique owned `.pulse-tests/` runtimes, protected cleanup on success or
+failure, concurrent-run isolation, and bounded abandoned-run recovery. Pass `-KeepRuntime` to
+retain a specific runtime for inspection. Cached historical material is outside these checks.

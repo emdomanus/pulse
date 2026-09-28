@@ -27,10 +27,10 @@ export type Event<ContextT> = {
 }
 
 export type CompiledEvent<ContextT> = {
-	time: number,
-	authorIndex: number,
-	run: EventCallback<ContextT>,
-	reverse: EventCallback<ContextT>?,
+	read time: number,
+	read authorIndex: number,
+	read run: EventCallback<ContextT>,
+	read reverse: EventCallback<ContextT>?,
 }
 
 export type Sample<ContextT> = {
@@ -40,10 +40,10 @@ export type Sample<ContextT> = {
 }
 
 export type CompiledSample<ContextT> = {
-	startTime: number,
-	endTime: number,
-	authorIndex: number,
-	run: SampleCallback<ContextT>,
+	read startTime: number,
+	read endTime: number,
+	read authorIndex: number,
+	read run: SampleCallback<ContextT>,
 }
 
 export type SequenceBoundary = {
@@ -64,15 +64,15 @@ export type SequenceDefinition<ContextT> = {
 
 export type Sequence<ContextT> = {
 	-- Invariant type brand. The compiler stores one shared identity function; callers do not invoke it.
-	_contextType: (ContextT) -> ContextT,
-	getDuration: (self: Sequence<ContextT>) -> number,
-	isLooping: (self: Sequence<ContextT>) -> boolean,
+	read _contextType: (ContextT) -> ContextT,
+	read getDuration: (self: Sequence<ContextT>) -> number,
+	read isLooping: (self: Sequence<ContextT>) -> boolean,
 }
 
 export type SequenceConstructor<ContextT> = (definition: SequenceDefinition<ContextT>) -> Sequence<ContextT>
 
 export type SequenceState<ContextT> = {
-	_contextType: (ContextT) -> ContextT,
+	read _contextType: (ContextT) -> ContextT,
 	_duration: number,
 	_loop: boolean,
 	_events: { CompiledEvent<ContextT> },
@@ -85,26 +85,26 @@ export type SequenceState<ContextT> = {
 
 -- Complete compiled view retained by Playback; the package facade exposes only Sequence.
 export type SequenceStored<ContextT> = Sequence<ContextT> & {
-	validateAddress: (self: SequenceStored<ContextT>, address: SequenceAddress) -> PlaybackPosition,
-	positionAt: (self: SequenceStored<ContextT>, unwrappedTimePosition: number) -> PlaybackPosition,
-	nextBoundary: (
+	read validateAddress: (self: SequenceStored<ContextT>, address: SequenceAddress) -> PlaybackPosition,
+	read positionAt: (self: SequenceStored<ContextT>, unwrappedTimePosition: number) -> PlaybackPosition,
+	read nextBoundary: (
 		self: SequenceStored<ContextT>,
 		position: PlaybackPosition,
 		direction: TraversalDirection
 	) -> SequenceBoundary?,
-	nextBoundaryInto: (
+	read nextBoundaryInto: (
 		self: SequenceStored<ContextT>,
 		position: PlaybackPosition,
 		direction: TraversalDirection,
 		output: SequenceBoundary
 	) -> boolean,
-	boundaryAt: (self: SequenceStored<ContextT>, position: PlaybackPosition) -> SequenceBoundary?,
-	eventRangeAt: (self: SequenceStored<ContextT>, localTimePosition: number) -> (number, number),
-	getEvent: (self: SequenceStored<ContextT>, index: number) -> CompiledEvent<ContextT>,
-	getSamples: (self: SequenceStored<ContextT>) -> { CompiledSample<ContextT> },
-	getOnPlay: (self: SequenceStored<ContextT>) -> EventCallback<ContextT>?,
-	getOnAddress: (self: SequenceStored<ContextT>) -> AddressCallback<ContextT>?,
-	getOnLoop: (self: SequenceStored<ContextT>) -> LoopCallback<ContextT>?,
+	read boundaryAt: (self: SequenceStored<ContextT>, position: PlaybackPosition) -> SequenceBoundary?,
+	read eventRangeAt: (self: SequenceStored<ContextT>, localTimePosition: number) -> (number, number),
+	read getEvent: (self: SequenceStored<ContextT>, index: number) -> CompiledEvent<ContextT>,
+	read getSamples: (self: SequenceStored<ContextT>) -> { CompiledSample<ContextT> },
+	read getOnPlay: (self: SequenceStored<ContextT>) -> EventCallback<ContextT>?,
+	read getOnAddress: (self: SequenceStored<ContextT>) -> AddressCallback<ContextT>?,
+	read getOnLoop: (self: SequenceStored<ContextT>) -> LoopCallback<ContextT>?,
 }
 
 export type SequenceImpl<ContextT> = SequenceStored<ContextT> & SequenceState<ContextT>

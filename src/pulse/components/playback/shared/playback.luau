@@ -22,6 +22,7 @@ type Playback = PlaybackTypes.Playback
 type PlaybackImpl = PlaybackTypes.PlaybackImpl
 type PlaybackOptions = PlaybackTypes.PlaybackOptions
 type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
+type PlaybackPositionSnapshot = PlaybackDefinitions.PlaybackPositionSnapshot
 type TraversalForecast = PlaybackTraversalTypes.TraversalForecast
 type SequenceAddress = PlaybackDefinitions.SequenceAddress
 type Sequence<ContextT> = SequenceTypes.Sequence<ContextT>
@@ -171,8 +172,8 @@ local function emitAddress(self: PlaybackImpl, cause: AddressCause, mode: Addres
 		requestTerminal(self, "failed", "catchUpLimitExceeded")
 		return false
 	end
-	local immutableFrom: PlaybackPosition? = if from == nil then nil else table.freeze(publicPosition(from))
-	local immutableTarget: PlaybackPosition = table.freeze(publicPosition(self._position))
+	local immutableFrom: PlaybackPositionSnapshot? = if from == nil then nil else table.freeze(publicPosition(from))
+	local immutableTarget: PlaybackPositionSnapshot = table.freeze(publicPosition(self._position))
 	local info: AddressInfo = table.freeze({
 		cause = cause,
 		mode = mode,
@@ -668,7 +669,7 @@ local function runSamples(self: PlaybackImpl): boolean
 				return false
 			end
 			if info == nil then
-				local immutablePosition: PlaybackPosition = table.freeze(publicPosition(self._position))
+				local immutablePosition: PlaybackPositionSnapshot = table.freeze(publicPosition(self._position))
 				info = table.freeze({ position = immutablePosition, rate = effectiveRate })
 			end
 			if not pcall(sample.run, asControl(self), info :: SampleInfo, self._context) then

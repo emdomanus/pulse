@@ -12,14 +12,17 @@ type AddressCallback<ContextT> = SequenceTypes.AddressCallback<ContextT>
 type LoopCallback<ContextT> = SequenceTypes.LoopCallback<ContextT>
 
 export type SequenceBuilder<ContextT> = {
-	duration: (self: SequenceBuilder<ContextT>, seconds: number) -> SequenceBuilder<ContextT>,
-	loop: (self: SequenceBuilder<ContextT>, enabled: boolean?) -> SequenceBuilder<ContextT>,
-	event: (self: SequenceBuilder<ContextT>, event: Event<ContextT>) -> SequenceBuilder<ContextT>,
-	sample: (self: SequenceBuilder<ContextT>, sample: Sample<ContextT>) -> SequenceBuilder<ContextT>,
-	onPlay: (self: SequenceBuilder<ContextT>, callback: EventCallback<ContextT>) -> SequenceBuilder<ContextT>,
-	onAddress: (self: SequenceBuilder<ContextT>, callback: AddressCallback<ContextT>) -> SequenceBuilder<ContextT>,
-	onLoop: (self: SequenceBuilder<ContextT>, callback: LoopCallback<ContextT>) -> SequenceBuilder<ContextT>,
-	compile: (self: SequenceBuilder<ContextT>) -> Sequence<ContextT>,
+	read duration: (self: SequenceBuilder<ContextT>, seconds: number) -> SequenceBuilder<ContextT>,
+	read loop: (self: SequenceBuilder<ContextT>, enabled: boolean?) -> SequenceBuilder<ContextT>,
+	read event: (self: SequenceBuilder<ContextT>, event: Event<ContextT>) -> SequenceBuilder<ContextT>,
+	read sample: (self: SequenceBuilder<ContextT>, sample: Sample<ContextT>) -> SequenceBuilder<ContextT>,
+	read onPlay: (self: SequenceBuilder<ContextT>, callback: EventCallback<ContextT>) -> SequenceBuilder<ContextT>,
+	read onAddress: (
+		self: SequenceBuilder<ContextT>,
+		callback: AddressCallback<ContextT>
+	) -> SequenceBuilder<ContextT>,
+	read onLoop: (self: SequenceBuilder<ContextT>, callback: LoopCallback<ContextT>) -> SequenceBuilder<ContextT>,
+	read compile: (self: SequenceBuilder<ContextT>) -> Sequence<ContextT>,
 }
 
 export type SequenceBuilderImpl<ContextT> = SequenceBuilder<ContextT> & {

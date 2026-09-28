@@ -1,19 +1,55 @@
 # Tempo Integration
 
-A current Tempo `Clock` structurally satisfies Pulse's optional provider contract. Pulse has no
-Tempo package dependency and does not accept a Tempo runtime or service object; the composition
-root supplies the clock, phase, and direction tokens.
+Modern Tempo separates clock state from scheduling bindings and delivers argument-free change
+invalidations. Pulse's optional provider contract still consumes a change record. The host supplies
+a small adapter; neither Pulse nor the adapter owns or destroys the borrowed clock. Pulse keeps no
+Tempo package dependency.
 
 ```luau
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Pulse = require(ReplicatedStorage.packages.pulse)
 local Tempo = require(ReplicatedStorage.packages.tempo)
 
-local driver = Pulse.clockDriver(clock, runtime.phases.heartbeat, {
-	forward = Tempo.Enums.Direction.forward,
-	backward = Tempo.Enums.Direction.backward,
+type Phase = "heartbeat"
+local function tempoProvider(clock: Tempo.Clock<Phase>): Pulse.ProviderClock<Phase, Tempo.Direction>
+    local initialMapping = clock:getMapping()
+    return {
+        read = function() return clock:read() end,
+        isDestroyed = function() return clock:isDestroyed() end,
+        bindToChanged = function(_, callback, runInitially)
+            return clock:bindToChanged(function()
+                -- Each dispatch owns its record, including reentrant changes.
+                local change: Tempo.ClockChange = {
+                    kind = "mapping", current = initialMapping,
+                    currentTimePosition = 0, currentParentTimePosition = 0,
+                    discontinuous = false,
+                }
+                clock:readChangeInto(change)
+                callback(change)
+            end, runInitially)
+        end,
+        bindToReached = function(_, position, direction, callback, phase)
+            return clock:bindToReached(position, direction, callback, phase)
+        end,
+        cancel = function(_, id) return clock:cancel(id) end,
+        rescheduleAt = function(_, id, position, phase)
+            return clock:rescheduleAt(id, position, phase)
+        end,
+        bindPhase = function(_, phase, callback) return clock:bindPhase(phase, callback) end,
+    }
+end
+
+-- The host creates state with runtime:createClock(), then runtime:bindClock(state.reader).
+local provider = tempoProvider(clock)
+local driver = Pulse.clockDriver(provider, "heartbeat" :: Phase, {
+    forward = Tempo.Enums.Direction.forward,
+    backward = Tempo.Enums.Direction.backward,
 })
 ```
+
+A provider that already delivers records can forward its callback directly. Bind concrete provider
+methods in this adapter rather than casting a provider with a different recursive `self` type to
+`ProviderClock`. This preserves the solver's checks on phase, direction, and callback contracts.
 
 ## Select the phase explicitly
 

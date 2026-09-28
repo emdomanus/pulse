@@ -11,31 +11,31 @@ export type PhaseCallback = (clockDt: number, now: number) -> ()
 export type ReachedCallback = (now: number, direction: unknown) -> ()
 
 type ProviderClockReader = {
-	read: (self: ProviderClockReader) -> unknown,
-	bindToChanged: (
+	read read: (self: ProviderClockReader) -> unknown,
+	read bindToChanged: (
 		self: ProviderClockReader,
 		callback: RawClockChangedCallback,
 		runInitially: boolean?
 	) -> Release,
-	isDestroyed: (self: ProviderClockReader) -> boolean,
+	read isDestroyed: (self: ProviderClockReader) -> boolean,
 }
 
 type ProviderClockScheduling<PhaseInputT, DirectionTokenT> = {
-	bindToReached: (
+	read bindToReached: (
 		self: ProviderClockScheduling<PhaseInputT, DirectionTokenT>,
 		position: number,
 		direction: DirectionTokenT,
 		callback: ReachedCallback,
 		phase: PhaseInputT
 	) -> ScheduledTaskId,
-	cancel: (self: ProviderClockScheduling<PhaseInputT, DirectionTokenT>, id: ScheduledTaskId) -> boolean,
-	rescheduleAt: (
+	read cancel: (self: ProviderClockScheduling<PhaseInputT, DirectionTokenT>, id: ScheduledTaskId) -> boolean,
+	read rescheduleAt: (
 		self: ProviderClockScheduling<PhaseInputT, DirectionTokenT>,
 		id: ScheduledTaskId,
 		runAt: number,
 		phase: PhaseInputT
 	) -> boolean,
-	bindPhase: (
+	read bindPhase: (
 		self: ProviderClockScheduling<PhaseInputT, DirectionTokenT>,
 		phase: PhaseInputT,
 		callback: PhaseCallback
