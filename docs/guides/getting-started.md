@@ -28,8 +28,8 @@ local sequence = builder
 	:sample({
 		startTime = 0.2,
 		endTime = 0.8,
-		run = function(_playback, sample, context)
-			setTrailAt(context.character, sample.position.timePosition, sample.rate)
+		run = function(_playback, timePosition, _unwrappedTimePosition, rate, context)
+			setTrailAt(context.character, timePosition, rate)
 		end,
 	})
 	:compile()

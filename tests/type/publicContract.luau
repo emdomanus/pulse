@@ -63,10 +63,17 @@ local function proveCoreContract(): Pulse.Completion?
 			{
 				startTime = 0,
 				endTime = 2,
-				run = function(playback: Pulse.PlaybackControl, sample: Pulse.SampleInfo, context: InvocationContext)
+				run = function(
+					playback: Pulse.PlaybackControl,
+					timePosition: number,
+					unwrappedTimePosition: number,
+					rate: number,
+					context: InvocationContext
+				)
 					local _status: Pulse.Status = playback:getStatus()
-					local _rate: number = sample.rate
-					local _position: Pulse.PlaybackPositionSnapshot = sample.position
+					local _rate: number = rate
+					local _position: number = timePosition
+					local _unwrapped: number = unwrappedTimePosition
 					local _actorId: number = context.actorId
 				end,
 			},
@@ -156,7 +163,7 @@ local function proveBuilderContract(): Pulse.Sequence<InvocationContext>
 			run = function(_playback, _context) end,
 		})
 		:sample({
-			run = function(_playback, _sample, _context) end,
+			run = function(_playback, _timePosition, _unwrappedTimePosition, _rate, _context) end,
 		})
 		:onPlay(function(_playback, _context) end)
 		:onAddress(function(_playback, _info, _context) end)

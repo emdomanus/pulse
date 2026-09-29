@@ -140,7 +140,12 @@ local function createScenarioSequence(label: string, looping: boolean): Sequence
 		:sample({
 			startTime = 0,
 			endTime = 6,
-			run = function(_playback: PlaybackControl, _sample: Pulse.SampleInfo)
+			run = function(
+				_playback: PlaybackControl,
+				_timePosition: number,
+				_unwrappedTimePosition: number,
+				_rate: number
+			)
 				sampleCount += 1
 			end,
 		})

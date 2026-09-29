@@ -69,11 +69,6 @@ type PlaybackPosition = {
 	unwrappedTimePosition: number,
 }
 
-type SampleInfo = {
-	position: PlaybackPosition,
-	rate: number,
-}
-
 type AddressMode = "reconstruct" | "skip"
 type AddressInfo = {
 	cause: "initial" | "seek",
@@ -140,7 +135,13 @@ type Event = {
 type Sample = {
 	startTime: number?,
 	endTime: number?,
-	run: (playback: Playback, sample: SampleInfo, context: unknown) -> (),
+	run: (
+		playback: Playback,
+		timePosition: number,
+		unwrappedTimePosition: number,
+		rate: number,
+		context: unknown
+	) -> (),
 }
 
 type Definition = {
@@ -682,8 +683,8 @@ Harness.test("backward entry at an excluded Sample end retains phase ownership",
 				{
 					startTime = 0.2,
 					endTime = 0.8,
-					run = function(_playback, sample)
-						table.insert(positions, sample.position.timePosition)
+					run = function(_playback, timePosition, _unwrappedTimePosition, _rate)
+						table.insert(positions, timePosition)
 					end,
 				},
 			},
@@ -711,7 +712,7 @@ Harness.test("backward entry at an excluded Sample end retains phase ownership",
 	driven:cancel()
 end)
 
-Harness.test("event-only duration-side join is observed until forward source movement", function()
+Harness.test("event-only duration seek normalizes to zero and sleeps until its next deadline", function()
 	local clock = FakeClock.new()
 	local loops = 0
 	local zeroLoops: { number } = {}
@@ -733,26 +734,30 @@ Harness.test("event-only duration-side join is observed until forward source mov
 
 	driven:play()
 	driven:seek({ timePosition = 1, loopIndex = 2 }, "skip" :: AddressMode)
-	Harness.assertEqual(driven:getPosition().timePosition, 1)
-	Harness.assertEqual(driven:getPosition().loopIndex, 2)
+	Harness.assertEqual(driven:getPosition().timePosition, 0)
+	Harness.assertEqual(driven:getPosition().loopIndex, 3)
 	Harness.assertEqual(loops, 0)
 	Harness.assertEqual(#zeroLoops, 0)
-	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
 
 	clock:evaluatePhase(PHASE)
-	Harness.assertEqual(driven:getPosition().timePosition, 1)
-	Harness.assertEqual(driven:getPosition().loopIndex, 2)
+	Harness.assertEqual(driven:getPosition().timePosition, 0)
+	Harness.assertEqual(driven:getPosition().loopIndex, 3)
 	Harness.assertEqual(loops, 0)
 	Harness.assertEqual(#zeroLoops, 0)
-	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
 
 	clock:stepRootTo(0.0001, PHASE)
-	Harness.assertEqual(loops, 1)
-	Harness.assertArrayEqual(zeroLoops, { 3 })
-	Harness.assertNear(driven:getPosition().timePosition, 0.0001)
+	Harness.assertEqual(loops, 0)
+	Harness.assertArrayEqual(zeroLoops, {})
+	Harness.assertEqual(driven:getPosition().timePosition, 0)
 	Harness.assertEqual(driven:getPosition().loopIndex, 3)
 	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
 	Harness.assertEqual(clock:getTaskCount(), 1)
+	clock:stepRootTo(1, PHASE)
+	Harness.assertEqual(loops, 1)
+	Harness.assertArrayEqual(zeroLoops, { 4 })
+	Harness.assertEqual(driven:getPosition().loopIndex, 4)
 	driven:cancel()
 end)
 
@@ -802,7 +807,7 @@ Harness.test("event-only zero-side join is observed until backward source moveme
 
 	clock:stepRootTo(0.0001, PHASE)
 	Harness.assertEqual(loops, 1)
-	Harness.assertArrayEqual(durationLoops, { 2 })
+	Harness.assertArrayEqual(durationLoops, { 3 })
 	Harness.assertNear(driven:getPosition().timePosition, 0.9999)
 	Harness.assertEqual(driven:getPosition().loopIndex, 2)
 	Harness.assertEqual(clock:getPhaseBindingCount(), 0)
@@ -810,7 +815,7 @@ Harness.test("event-only zero-side join is observed until backward source moveme
 	driven:cancel()
 end)
 
-Harness.test("driver preserves a duration-side address until source motion enters the next loop", function()
+Harness.test("driver samples the canonical loop start immediately after a duration seek", function()
 	local clock = FakeClock.new()
 	local loops = 0
 	local samples = 0
@@ -833,14 +838,15 @@ Harness.test("driver preserves a duration-side address until source motion enter
 	driven:play()
 	samples = 0
 	driven:seek({ timePosition = 1, loopIndex = 2 }, "skip")
-	Harness.assertEqual(driven:getPosition().timePosition, 1)
-	Harness.assertEqual(driven:getPosition().loopIndex, 2)
+	Harness.assertEqual(driven:getPosition().timePosition, 0)
+	Harness.assertEqual(driven:getPosition().loopIndex, 3)
 	Harness.assertEqual(loops, 0)
 	Harness.assertEqual(clock:getPhaseBindingCount(), 1)
+	Harness.assertEqual(samples, 2)
 	samples = 0
 
 	clock:stepRootTo(0.1, PHASE)
-	Harness.assertEqual(loops, 1)
+	Harness.assertEqual(loops, 0)
 	Harness.assertEqual(samples, 1)
 	Harness.assertNear(driven:getPosition().timePosition, 0.1)
 	Harness.assertEqual(driven:getPosition().loopIndex, 3)
@@ -865,8 +871,8 @@ Harness.test("paused driven seek callback resume waits for the next phase sample
 			{
 				startTime = 0,
 				endTime = 2,
-				run = function(_playback, sample)
-					table.insert(samplePositions, sample.position.timePosition)
+				run = function(_playback, timePosition, _unwrappedTimePosition, _rate)
+					table.insert(samplePositions, timePosition)
 				end,
 			},
 		},
@@ -1027,8 +1033,8 @@ Harness.test("continuous rate change catches up to the old boundary before reanc
 		},
 		samples = {
 			{
-				run = function(_playback, sample)
-					table.insert(sampledRates, sample.rate)
+				run = function(_playback, _timePosition, _unwrappedTimePosition, rate)
+					table.insert(sampledRates, rate)
 				end,
 			},
 		},
@@ -1154,8 +1160,8 @@ Harness.test("phase fanout safely skips a sibling after unsupported attached-raw
 			duration = 1,
 			samples = {
 				{
-					run = function(_playback, sample)
-						if sample.position.timePosition > 0 then
+					run = function(_playback, timePosition, _unwrappedTimePosition, _rate)
+						if timePosition > 0 then
 							-- Defensive coverage only: production hosts must cancel through DrivenPlayback while attached.
 							secondCore:cancel("removed")
 						end
@@ -1201,8 +1207,8 @@ Harness.test("phase fanout defers a playback added during dispatch", function()
 				duration = 1,
 				samples = {
 					{
-						run = function(_playback, sample)
-							if sample.position.timePosition > 0 and not introduced then
+						run = function(_playback, timePosition, _unwrappedTimePosition, _rate)
+							if timePosition > 0 and not introduced then
 								introduced = true
 								local created = driver:attach(
 									Pulse.playback(
@@ -1284,8 +1290,8 @@ Harness.test("driver does not filter provider notifications by external revision
 		duration = 1,
 		samples = {
 			{
-				run = function(_playback, sample)
-					table.insert(rates, sample.rate)
+				run = function(_playback, _timePosition, _unwrappedTimePosition, rate)
+					table.insert(rates, rate)
 				end,
 			},
 		},

@@ -84,22 +84,25 @@ and rate scalars; they remain FIFO with control operations and share the enclosi
 The internal `getAcceptedSample` observation returns a newly allocated detached record.
 
 `writePositionInto(output)` fills a caller-owned position buffer without allocating or retaining
-it; `getPosition()` continues returning a detached record. Sampling creates its immutable position
-and `SampleInfo` only when an authored sampler is active. Delivered callback records may be retained
-and are never overwritten by later evaluations.
+it; `getPosition()` continues returning a detached record. Playback stores one unwrapped scalar
+and derives local time and loop index on demand. Samples receive local time, unwrapped time, and
+effective rate as numbers, followed by context; ordinary evaluations allocate no Pulse-owned
+tables. Address, loop, and completion records remain immutable and may be retained. Those paths,
+cleanup and reentrant operation queues can still allocate.
 
 Each driven attachment owns a reusable forecast output. Playback computes its next forecast boundary
-into an owned scratch record through `nextBoundaryInto`, avoiding temporary forecast/boundary tables.
+as scalar return values, avoiding temporary forecast/boundary tables.
 ClockDriver reuses an owned membership snapshot during serialized phase/clock dispatch and an owned
 sample scratch for intermediate mapping boundaries. Queued provider notifications still own distinct
 samples; they never retain that scratch. Seek queues retain the already validated detached address
-instead of copying it again. Cursor/traversal records and immutable callback records retain their
-existing ownership; they are not pooled or shared across playbacks.
+instead of copying it again. Immutable callback records retain their existing ownership;
+they are not pooled or shared across playbacks.
 
 Core state changes only through `play(sample)`, `evaluate(sample)`, or explicit Playback controls.
 `getPosition()` returns the last accepted cursor and never reads or projects implicit time.
-At an explicitly addressed duration-side loop join, the exact identity remains visible until a
-future forward evaluation consumes the loop crossing and next-cycle zero boundary.
+Looping addresses at `duration` normalize to zero of the following loop. Non-looping addresses
+retain the final endpoint. Explicit skips suppress target Events; reconstructing a canonical loop
+start replays that loop's zero Events, without replaying the previous loop's duration Events.
 
 ### Mutation timestamps
 
@@ -112,9 +115,11 @@ source movement during the pause is not traversed.
 ## Traversal and sampling
 
 Natural evaluation traverses every crossed discrete boundary exactly once. Equal-time events run
-in authored order forward and reverse authored order backward. Loop joins preserve exact identity:
-`{ timePosition = duration, loopIndex = n }` and `{ timePosition = 0, loopIndex = n + 1 }` share an
-unwrapped coordinate but remain distinct boundary positions.
+in authored order forward and reverse authored order backward. Loop joins have one canonical
+position: `{ timePosition = duration, loopIndex = n }` normalizes to
+`{ timePosition = 0, loopIndex = n + 1 }`. Traversal history separately preserves duration Events,
+loop hooks, and zero Events in forward order (inverse order backward), including direction changes.
+This event history does not retain another position record or a stored loop index.
 
 After all crossed events and loop hooks, each authored `Sample` active at the final local position
 runs once. Sample intervals use `[startTime, endTime)` in both traversal directions. A large or
@@ -172,7 +177,7 @@ An attachment owns one next-boundary reached task. Attachments share one phase b
 whenever phase evaluation is required: an exact Sample is active, backward movement is poised at
 an excluded Sample `endTime`, an outward-matching zero-distance loop join is pending, or a
 synchronous callback-side `PlaybackControl:resume()` is awaiting its first post-resume sample. The
-excluded endpoint itself still emits no Sample. A pending join retains exact addressed identity
+excluded endpoint itself still emits no Sample. A pending backward join retains canonical zero
 through stationary notifications and is consumed only by actual source-coordinate movement. The
 first subsequent phase evaluation clears a pending resume without catch-up; an event-only
 attachment then releases phase ownership and schedules its next deadline. Event and completion

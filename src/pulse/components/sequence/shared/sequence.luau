@@ -18,9 +18,7 @@ type Sample<ContextT> = SequenceTypes.Sample<ContextT>
 type AddressCallback = SequenceTypes.AddressCallback<unknown>
 type EventCallback = SequenceTypes.EventCallback<unknown>
 type LoopCallback = SequenceTypes.LoopCallback<unknown>
-type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
 type SequenceAddress = PlaybackDefinitions.SequenceAddress
-type SequenceBoundary = SequenceTypes.SequenceBoundary
 type StoredEvent = SequenceTypes.StoredEvent
 type StoredSample = SequenceTypes.StoredSample
 type TraversalDirection = PlaybackVocabulary.TraversalDirection
@@ -224,27 +222,7 @@ local function eventFirstAfter(events: { StoredEvent }, target: number): number
 	return low
 end
 
-local function writeBoundary(
-	timePosition: number,
-	loopIndex: number,
-	unwrappedTimePosition: number,
-	output: SequenceBoundary?
-): SequenceBoundary
-	if output ~= nil then
-		output.timePosition = timePosition
-		output.loopIndex = loopIndex
-		output.unwrappedTimePosition = unwrappedTimePosition
-		return output
-	end
-	return { timePosition = timePosition, loopIndex = loopIndex, unwrappedTimePosition = unwrappedTimePosition }
-end
-
-local function composeBoundary(
-	self: StoredSequenceImpl,
-	loopIndex: number,
-	boundaryIndex: number,
-	output: SequenceBoundary?
-): SequenceBoundary
+local function composeBoundary(self: StoredSequenceImpl, loopIndex: number, boundaryIndex: number): (number, number)
 	local localBoundary = self._boundaries[boundaryIndex]
 	assert(localBoundary ~= nil, "Pulse loop boundary index is out of bounds")
 	assert(
@@ -256,7 +234,9 @@ local function composeBoundary(
 			and (localBoundary ~= 0 or loopIndex > -MAX_EXACT_INTEGER),
 		"Pulse loop boundary crosses outside exactly representable loop identity"
 	)
-	local unwrappedTimePosition = loopIndex * self._duration + localBoundary
+	local unwrappedTimePosition = if localBoundary == self._duration
+		then (loopIndex + 1) * self._duration
+		else loopIndex * self._duration + localBoundary
 	assertFinite(unwrappedTimePosition, "loop boundary unwrappedTimePosition")
 	local previousBoundary = self._boundaries[boundaryIndex - 1]
 	if previousBoundary ~= nil then
@@ -270,41 +250,7 @@ local function composeBoundary(
 		assertFinite(followingCoordinate, "following loop boundary unwrappedTimePosition")
 		assert(unwrappedTimePosition < followingCoordinate, "Pulse adjacent loop boundary coordinates collide")
 	end
-	return writeBoundary(localBoundary, loopIndex, unwrappedTimePosition, output)
-end
-
-local function nextBoundary(
-	self: StoredSequenceImpl,
-	position: PlaybackPosition,
-	direction: TraversalDirection,
-	output: SequenceBoundary?
-): SequenceBoundary?
-	local boundaries = self._boundaries
-	if not self._loop then
-		if direction == "forward" then
-			local timePosition = boundaries[firstAfter(boundaries, position.timePosition)]
-			return if timePosition == nil then nil else writeBoundary(timePosition, 0, timePosition, output)
-		end
-		local timePosition = boundaries[firstAtOrAfter(boundaries, position.timePosition) - 1]
-		return if timePosition == nil then nil else writeBoundary(timePosition, 0, timePosition, output)
-	end
-
-	local loopIndex = position.loopIndex
-	local localPosition = position.timePosition
-	if direction == "forward" then
-		local index = firstAfter(boundaries, localPosition)
-		if index <= #boundaries then
-			return composeBoundary(self, loopIndex, index, output)
-		end
-		return composeBoundary(self, loopIndex + 1, 2, output)
-	end
-
-	local index = firstAtOrAfter(boundaries, localPosition) - 1
-	if index >= 1 then
-		return composeBoundary(self, loopIndex, index, output)
-	end
-	local previousIndex = #boundaries - 1
-	return composeBoundary(self, loopIndex - 1, previousIndex, output)
+	return localBoundary, unwrappedTimePosition
 end
 
 local Sequence = {}
@@ -324,21 +270,16 @@ function Sequence.isLooping(self: StoredSequenceImpl): boolean
 	return self._loop
 end
 
-function Sequence.positionAt(self: StoredSequenceImpl, unwrappedTimePosition: number): PlaybackPosition
+function Sequence.positionComponents(self: StoredSequenceImpl, unwrappedTimePosition: number): (number, number)
 	assertFinite(unwrappedTimePosition, "unwrapped playback position")
 	if not self._loop then
-		local timePosition = math.clamp(unwrappedTimePosition, 0, self._duration)
-		return {
-			timePosition = timePosition,
-			loopIndex = 0,
-			unwrappedTimePosition = timePosition,
-		}
+		return math.clamp(unwrappedTimePosition, 0, self._duration), 0
 	end
-
 	local loopIndex = math.floor(unwrappedTimePosition / self._duration)
 	assert(math.abs(loopIndex) <= MAX_EXACT_INTEGER, "Pulse loop position exceeds exactly representable loop identity")
 	local timePosition = unwrappedTimePosition - loopIndex * self._duration
-	if timePosition >= self._duration then
+	-- Division can round an exact represented multiple just below its integer quotient.
+	if unwrappedTimePosition == (loopIndex + 1) * self._duration or timePosition >= self._duration then
 		loopIndex += 1
 		timePosition = 0
 	elseif timePosition < 0 then
@@ -346,14 +287,26 @@ function Sequence.positionAt(self: StoredSequenceImpl, unwrappedTimePosition: nu
 		timePosition += self._duration
 	end
 	assert(math.abs(loopIndex) <= MAX_EXACT_INTEGER, "Pulse loop position exceeds exactly representable loop identity")
-	return {
-		timePosition = timePosition,
-		loopIndex = loopIndex,
-		unwrappedTimePosition = unwrappedTimePosition,
-	}
+	-- Recover an exact authored boundary after subtracting the loop offset. Without
+	-- this, rounding can revisit an event or include a sample's excluded endpoint.
+	local loopStart = loopIndex * self._duration
+	local index = firstAtOrAfter(self._boundaries, timePosition)
+	local following = self._boundaries[index]
+	local previous = self._boundaries[index - 1]
+	if following ~= nil and following < self._duration and loopStart + following == unwrappedTimePosition then
+		timePosition = following
+	elseif previous ~= nil and loopStart + previous == unwrappedTimePosition then
+		timePosition = previous
+	end
+	return timePosition, loopIndex
 end
 
-function Sequence.validateAddress(self: StoredSequenceImpl, address: SequenceAddress): PlaybackPosition
+function Sequence.positionAt(self: StoredSequenceImpl, unwrappedTimePosition: number): number
+	local timePosition = self:positionComponents(unwrappedTimePosition)
+	return if self._loop then unwrappedTimePosition else timePosition
+end
+
+function Sequence.validateAddress(self: StoredSequenceImpl, address: SequenceAddress): number
 	assertFinite(address.timePosition, "address timePosition")
 	assert(
 		address.timePosition >= 0 and address.timePosition <= self._duration,
@@ -372,56 +325,24 @@ function Sequence.validateAddress(self: StoredSequenceImpl, address: SequenceAdd
 		local loopEnd = loopStart + self._duration
 		assertFinite(loopStart, "address loop start")
 		assertFinite(loopEnd, "address loop end")
-		unwrapped = loopStart + address.timePosition
+		unwrapped = if address.timePosition == self._duration
+			then (loopIndex + 1) * self._duration
+			else loopStart + address.timePosition
 		assertFinite(unwrapped, "address unwrappedTimePosition")
 		assert(
 			(address.timePosition == 0 or unwrapped > loopStart)
 				and (address.timePosition == self._duration or unwrapped < loopEnd),
 			"Pulse address must preserve a distinct coordinate within its exact loop identity"
 		)
-		return {
-			timePosition = address.timePosition,
-			loopIndex = loopIndex,
-			unwrappedTimePosition = unwrapped,
-		}
+		return self:positionAt(unwrapped)
 	end
-	return {
-		timePosition = address.timePosition,
-		loopIndex = loopIndex,
-		unwrappedTimePosition = unwrapped,
-	}
+	return unwrapped
 end
 
-function Sequence.nextBoundaryInto(
-	self: StoredSequenceImpl,
-	position: PlaybackPosition,
-	direction: TraversalDirection,
-	output: SequenceBoundary
-): boolean
-	return nextBoundary(self, position, direction, output) ~= nil
-end
-
-function Sequence.boundaryAt(self: StoredSequenceImpl, position: PlaybackPosition): SequenceBoundary?
-	if
-		not isFinite(position.timePosition)
-		or not isFinite(position.unwrappedTimePosition)
-		or not isFinite(position.loopIndex)
-		or position.loopIndex % 1 ~= 0
-		or math.abs(position.loopIndex) > MAX_EXACT_INTEGER
-		or (not self._loop and position.loopIndex ~= 0)
-	then
-		return nil
-	end
-	local index = firstAtOrAfter(self._boundaries, position.timePosition)
-	local timePosition = self._boundaries[index]
-	if timePosition ~= position.timePosition then
-		return nil
-	end
-	return {
-		timePosition = timePosition,
-		loopIndex = position.loopIndex,
-		unwrappedTimePosition = position.unwrappedTimePosition,
-	}
+function Sequence.boundaryAt(self: StoredSequenceImpl, position: number): number?
+	local timePosition = self:positionComponents(position)
+	local index = firstAtOrAfter(self._boundaries, timePosition)
+	return if self._boundaries[index] == timePosition then timePosition else nil
 end
 
 function Sequence.eventRangeAt(self: StoredSequenceImpl, localTimePosition: number): (number, number)
@@ -455,10 +376,30 @@ end
 
 function Sequence.nextBoundary(
 	self: StoredSequenceImpl,
-	position: PlaybackPosition,
+	position: number,
 	direction: TraversalDirection
-): SequenceBoundary?
-	return nextBoundary(self, position, direction, nil)
+): (number?, number?)
+	local localPosition, loopIndex = self:positionComponents(position)
+	local boundaries = self._boundaries
+	if not self._loop then
+		local index = if direction == "forward"
+			then firstAfter(boundaries, localPosition)
+			else firstAtOrAfter(boundaries, localPosition) - 1
+		local timePosition = boundaries[index]
+		return timePosition, timePosition
+	end
+	if direction == "forward" then
+		local index = firstAfter(boundaries, localPosition)
+		if index <= #boundaries then
+			return composeBoundary(self, loopIndex, index)
+		end
+		return composeBoundary(self, loopIndex + 1, 2)
+	end
+	local index = firstAtOrAfter(boundaries, localPosition) - 1
+	if index >= 1 then
+		return composeBoundary(self, loopIndex, index)
+	end
+	return composeBoundary(self, loopIndex - 1, #boundaries - 1)
 end
 
 local module: SequenceModule = {

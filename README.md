@@ -31,9 +31,9 @@ local sequence = builder
 	:sample({
 		startTime = 0.2,
 		endTime = 1.0,
-		run = function(_playback, sample, _context)
+		run = function(_playback, timePosition, _unwrappedTimePosition, rate, _context)
 			-- Absolute sampled state; no dt accumulation.
-			print(sample.position.timePosition, sample.rate)
+			print(timePosition, rate)
 		end,
 	})
 	:compile()

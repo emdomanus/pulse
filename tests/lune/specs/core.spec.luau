@@ -29,10 +29,7 @@ type PlaybackPosition = {
 	unwrappedTimePosition: number,
 }
 
-type SampleInfo = {
-	position: PlaybackPosition,
-	rate: number,
-}
+type SampleCapture = { timePosition: number, unwrappedTimePosition: number, rate: number }
 
 type AddressMode = "reconstruct" | "skip"
 type AddressInfo = {
@@ -90,7 +87,13 @@ type Event = {
 type Sample = {
 	startTime: number?,
 	endTime: number?,
-	run: (playback: Playback, sample: SampleInfo, context: unknown) -> (),
+	run: (
+		playback: Playback,
+		timePosition: number,
+		unwrappedTimePosition: number,
+		rate: number,
+		context: unknown
+	) -> (),
 }
 
 type Definition = {
@@ -212,8 +215,8 @@ Harness.test("zero source position and rate are accepted through play direct and
 		duration = 10,
 		samples = {
 			{
-				run = function(_control, info)
-					table.insert(rates, info.rate)
+				run = function(_control, _timePosition, _unwrappedTimePosition, rate)
+					table.insert(rates, rate)
 					if queueZero then
 						queueZero = false
 						scratch.position = 0
@@ -336,28 +339,31 @@ Harness.test("reused forecasts clear stale fields across rates pause and termina
 	Harness.assertEqual(output.sourceDirection, nil)
 end)
 
-Harness.test("sample snapshots stay immutable and detached across later evaluations", function()
-	local observed: { SampleInfo } = {}
+Harness.test("sample scalar values can be retained independently across later evaluations", function()
+	local observed: { SampleCapture } = {}
 	local playback = createPlayback({
 		duration = 10,
-		samples = { {
-			run = function(_control, info)
-				table.insert(observed, info)
-			end,
-		} },
+		samples = {
+			{
+				run = function(_control, timePosition, unwrappedTimePosition, rate)
+					table.insert(
+						observed,
+						{ timePosition = timePosition, unwrappedTimePosition = unwrappedTimePosition, rate = rate }
+					)
+				end,
+			},
+		},
 	})
 	playback:play(timeSample(0, 2))
 	playback:evaluate(timeSample(1, 3))
-	Harness.assertEqual(observed[1].position.timePosition, 0)
+	Harness.assertEqual(observed[1].timePosition, 0)
 	Harness.assertEqual(observed[1].rate, 2)
-	Harness.assertEqual(observed[2].position.timePosition, 1)
+	Harness.assertEqual(observed[2].timePosition, 1)
 	Harness.assertEqual(observed[2].rate, 3)
-	Harness.assertThrows(function()
-		observed[1].rate = 999
-	end)
-	Harness.assertThrows(function()
-		observed[1].position.timePosition = 999
-	end)
+	Harness.assertEqual(observed[1].unwrappedTimePosition, 0)
+	Harness.assertEqual(observed[2].unwrappedTimePosition, 1)
+	observed[1].timePosition = 999
+	Harness.assertEqual(playback:getPosition().timePosition, 1)
 end)
 
 Harness.test("borrowed play and evaluate samples retain independent scalar anchors", function()
@@ -366,8 +372,8 @@ Harness.test("borrowed play and evaluate samples retain independent scalar ancho
 		duration = 100,
 		samples = {
 			{
-				run = function(_control, info)
-					table.insert(rates, info.rate)
+				run = function(_control, _timePosition, _unwrappedTimePosition, rate)
+					table.insert(rates, rate)
 				end,
 			},
 		},
@@ -430,9 +436,9 @@ Harness.test("reentrant evaluations snapshot reused scratch values and drain FIF
 		duration = 100,
 		samples = {
 			{
-				run = function(_control, info)
-					table.insert(positions, info.position.timePosition)
-					table.insert(rates, info.rate)
+				run = function(_control, timePosition, _unwrappedTimePosition, rate)
+					table.insert(positions, timePosition)
+					table.insert(rates, rate)
 					if not queued then
 						queued = true
 						for index = 1, 3 do
@@ -463,10 +469,10 @@ Harness.test("reentrant evaluation and control mixtures preserve order around th
 		duration = 100,
 		samples = {
 			{
-				run = function(control, info)
-					table.insert(positions, info.position.timePosition)
-					table.insert(rates, info.rate)
-					if info.position.timePosition == 1 and not queued then
+				run = function(control, timePosition, _unwrappedTimePosition, rate)
+					table.insert(positions, timePosition)
+					table.insert(rates, rate)
+					if timePosition == 1 and not queued then
 						queued = true
 						scratch.position = 2
 						scratch.rate = 2
@@ -694,13 +700,16 @@ Harness.test("core compiler freezes declarations and exposes no sequence address
 end)
 
 Harness.test("raw playback uses absolute source anchors without multiplying position delta by rate", function()
-	local observed: { SampleInfo } = {}
+	local observed: { SampleCapture } = {}
 	local playback = createPlayback({
 		duration = 10,
 		samples = {
 			{
-				run = function(_playback, sample)
-					table.insert(observed, sample)
+				run = function(_playback, timePosition, unwrappedTimePosition, rate)
+					table.insert(
+						observed,
+						{ timePosition = timePosition, unwrappedTimePosition = unwrappedTimePosition, rate = rate }
+					)
 				end,
 			},
 		},
@@ -715,7 +724,7 @@ Harness.test("raw playback uses absolute source anchors without multiplying posi
 	playback:evaluate({ position = 100.5, rate = 7 })
 	Harness.assertNear(playback:getPosition().timePosition, 1.25)
 	Harness.assertEqual(#observed, 2)
-	Harness.assertNear(observed[2].position.timePosition, 1.25)
+	Harness.assertNear(observed[2].timePosition, 1.25)
 	Harness.assertNear(observed[2].rate, 14)
 end)
 
@@ -748,8 +757,8 @@ Harness.test("a large evaluation traverses every event and samples final state o
 			{
 				startTime = 0,
 				endTime = 2,
-				run = function(_playback, sample)
-					table.insert(samples, sample.position.timePosition)
+				run = function(_playback, timePosition, _unwrappedTimePosition, _rate)
+					table.insert(samples, timePosition)
 				end,
 			},
 		},
@@ -770,8 +779,8 @@ Harness.test("samples use direction-independent start-inclusive end-exclusive in
 			{
 				startTime = 0.2,
 				endTime = 0.8,
-				run = function(_playback, sample)
-					table.insert(positions, sample.position.timePosition)
+				run = function(_playback, timePosition, _unwrappedTimePosition, _rate)
+					table.insert(positions, timePosition)
 				end,
 			},
 		},
@@ -854,15 +863,15 @@ Harness.test("multi-loop forward and backward evaluation preserves exact loop id
 	Harness.assertArrayEqual(runs, { "+0", "+1", "+2", "-2", "-1", "-0" })
 end)
 
-Harness.test("explicit loop addresses preserve both sides of one unwrapped boundary", function()
+Harness.test("explicit duration and zero loop addresses normalize to the same start", function()
 	local sequence = Pulse.sequence({ duration = 1, loop = true })
 	local playback = Pulse.playback(sequence, nil, { initialMode = "skip" })
 	playback:play(timeSample(0))
 
 	playback:seek({ timePosition = 1, loopIndex = 2 }, "skip")
 	local durationSide = playback:getPosition()
-	Harness.assertEqual(durationSide.timePosition, 1)
-	Harness.assertEqual(durationSide.loopIndex, 2)
+	Harness.assertEqual(durationSide.timePosition, 0)
+	Harness.assertEqual(durationSide.loopIndex, 3)
 	Harness.assertEqual(durationSide.unwrappedTimePosition, 3)
 
 	playback:seek({ timePosition = 0, loopIndex = 3 }, "skip")
@@ -872,7 +881,7 @@ Harness.test("explicit loop addresses preserve both sides of one unwrapped bound
 	Harness.assertEqual(zeroSide.unwrappedTimePosition, 3)
 end)
 
-Harness.test("exact duration addresses preserve identity until future loop traversal", function()
+Harness.test("exact duration seeks reconstruct the canonical next-loop start", function()
 	local order: { string } = {}
 	local sequence = Pulse.sequence({
 		duration = 1,
@@ -899,21 +908,21 @@ Harness.test("exact duration addresses preserve identity until future loop trave
 	playback:play(timeSample(0))
 
 	playback:seek({ timePosition = 1, loopIndex = 2 }, "reconstruct")
-	Harness.assertArrayEqual(order, { "zero@2", "duration@2" })
-	Harness.assertEqual(playback:getPosition().timePosition, 1)
-	Harness.assertEqual(playback:getPosition().loopIndex, 2)
+	Harness.assertArrayEqual(order, { "zero@3" })
+	Harness.assertEqual(playback:getPosition().timePosition, 0)
+	Harness.assertEqual(playback:getPosition().loopIndex, 3)
 
 	playback:evaluate(timeSample(0.1))
-	Harness.assertArrayEqual(order, { "zero@2", "duration@2", "loop@2", "zero@3" })
+	Harness.assertArrayEqual(order, { "zero@3" })
 	Harness.assertNear(playback:getPosition().timePosition, 0.1)
 	Harness.assertEqual(playback:getPosition().loopIndex, 3)
 
 	order = {}
 	playback:seek({ timePosition = 1, loopIndex = 4 }, "skip")
-	Harness.assertEqual(playback:getPosition().timePosition, 1)
-	Harness.assertEqual(playback:getPosition().loopIndex, 4)
+	Harness.assertEqual(playback:getPosition().timePosition, 0)
+	Harness.assertEqual(playback:getPosition().loopIndex, 5)
 	playback:evaluate(timeSample(0.2))
-	Harness.assertArrayEqual(order, { "loop@4", "zero@5" })
+	Harness.assertArrayEqual(order, {})
 	Harness.assertNear(playback:getPosition().timePosition, 0.1)
 	Harness.assertEqual(playback:getPosition().loopIndex, 5)
 end)
@@ -1217,6 +1226,78 @@ Harness.test("numeric and catch-up limits fail explicitly", function()
 	end, "exact")
 end)
 
+Harness.test("fractional loop boundaries stay canonical in both directions", function()
+	for _, duration in { 0.1, 0.4, 1.3 } do
+		for _, loopIndex in { -3, -1, 0, 3, 7 } do
+			local sequence = Pulse.sequence({ duration = duration, loop = true })
+			local playback = Pulse.playback(sequence, nil, {
+				position = { timePosition = duration, loopIndex = loopIndex },
+				initialMode = "skip",
+			})
+			playback:play(timeSample(0))
+			local position = playback:getPosition()
+			Harness.assertEqual(position.timePosition, 0)
+			Harness.assertEqual(position.loopIndex, loopIndex + 1)
+			Harness.assertEqual(position.unwrappedTimePosition, (loopIndex + 1) * duration)
+			playback:evaluate(timeSample(duration / 10))
+			Harness.assertEqual(playback:getStatus(), "playing")
+			Harness.assertNear(playback:getPosition().timePosition, duration / 10)
+			playback:evaluate(timeSample(-duration / 10, -1))
+			Harness.assertEqual(playback:getStatus(), "playing")
+			Harness.assertEqual(playback:getPosition().loopIndex, loopIndex)
+			Harness.assertNear(playback:getPosition().timePosition, duration * 0.9)
+		end
+	end
+end)
+
+Harness.test("fractional authored boundaries fire once and preserve half-open samples", function()
+	for _, loopIndex in { -3, 3, 7 } do
+		local forward, backward, samples = 0, 0, 0
+		local playback = createPlayback({
+			duration = 0.4,
+			loop = true,
+			events = {
+				{
+					time = 0.1,
+					run = function()
+						forward += 1
+					end,
+					reverse = function()
+						backward += 1
+					end,
+				},
+			},
+			samples = {
+				{
+					startTime = 0,
+					endTime = 0.1,
+					run = function()
+						samples += 1
+					end,
+				},
+			},
+		}, { initialMode = "skip" })
+		playback:play(timeSample(0))
+		playback:evaluate(timeSample(loopIndex * 0.4 + 0.05))
+		forward, backward, samples = 0, 0, 0
+		playback:evaluate(timeSample(loopIndex * 0.4 + 0.1))
+		Harness.assertEqual(playback:getStatus(), "playing")
+		Harness.assertEqual(forward, 1)
+		Harness.assertEqual(samples, 0)
+		playback:evaluate(timeSample(loopIndex * 0.4 + 0.15))
+		Harness.assertEqual(playback:getStatus(), "playing")
+		Harness.assertEqual(forward, 1)
+		playback:evaluate(timeSample(loopIndex * 0.4 + 0.1, -1))
+		Harness.assertEqual(playback:getStatus(), "playing")
+		Harness.assertEqual(backward, 1)
+		Harness.assertEqual(samples, 0)
+		playback:evaluate(timeSample(loopIndex * 0.4 + 0.05, -1))
+		Harness.assertEqual(playback:getStatus(), "playing")
+		Harness.assertEqual(backward, 1)
+		Harness.assertEqual(samples, 1)
+	end
+end)
+
 Harness.test("typed per-play context reaches every authored callback family", function()
 	local context = { actorId = 17 }
 	local seen = { play = 0, address = 0, event = 0, reverse = 0, sample = 0, loop = 0 }
@@ -1239,7 +1320,7 @@ Harness.test("typed per-play context reaches every authored callback family", fu
 			},
 			samples = {
 				{
-					run = function(_playback, _sample, received)
+					run = function(_playback, _timePosition, _unwrappedTimePosition, _rate, received)
 						Harness.assertEqual(received, context)
 						seen.sample += 1
 					end,

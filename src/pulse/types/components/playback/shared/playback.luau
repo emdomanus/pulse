@@ -13,7 +13,6 @@ type Completion = PlaybackDefinitions.Completion
 type LoopChange = PlaybackDefinitions.LoopChange
 type PlaybackControl = PlaybackControlTypes.PlaybackControl
 type PlaybackDriver = PlaybackDriverTypes.PlaybackDriver
-type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
 type Release = PlaybackDefinitions.Release
 type SequenceAddress = PlaybackDefinitions.SequenceAddress
 type StoredSequence = SequenceTypes.StoredSequence
@@ -61,7 +60,7 @@ export type SpeedOperation = {
 
 export type SeekOperation = {
 	kind: "seek",
-	target: PlaybackPosition,
+	target: number,
 	mode: AddressMode,
 }
 
@@ -96,9 +95,8 @@ export type PlaybackImpl = PlaybackDriven & {
 	_acceptedSourcePosition: number?,
 	_acceptedSourceRate: number?,
 	_resumePending: boolean,
-	_position: PlaybackPosition,
-	_forecastBoundary: PlaybackPosition,
-	_initialPosition: PlaybackPosition,
+	_position: number,
+	_initialPosition: number,
 	_initialMode: AddressMode,
 	_boundaryState: BoundaryState?,
 	_direction: TraversalDirection?,

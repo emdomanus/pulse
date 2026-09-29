@@ -266,9 +266,12 @@ Playback:getPosition() -> PlaybackPosition
 ```
 
 Returns a new record for the accepted cursor. It never reads, interpolates, or projects implicit
-clock/wall time. Exact loop-join identities remain distinct even when their unwrapped coordinate is
-equal. An explicit duration-side address remains on that side; a later forward evaluation performs
-the still-future loop hook and next-cycle zero work.
+clock/wall time. A looping Sequence normalizes exact loop multiples to local zero in the next
+loop. `{ timePosition = duration, loopIndex = n }` and `{ timePosition = 0, loopIndex = n + 1 }`
+therefore return identical positions. A non-looping Sequence clamps to `[0, duration]`, retaining
+its final endpoint. During loop-end Events, public reads already expose the canonical next-loop
+zero; Event ordering still runs duration Events, the loop hook, then zero Events forward (inverse
+order backward). Use `LoopChange` when a callback needs the crossed loop indices.
 
 <a id="playback-write-position-into"></a>
 ### Playback:writePositionInto

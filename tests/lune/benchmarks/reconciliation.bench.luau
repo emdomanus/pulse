@@ -8,7 +8,7 @@ type Event = {
 type Sample = {
 	startTime: number?,
 	endTime: number?,
-	run: (playback: unknown, sample: unknown, context: unknown) -> (),
+	run: (playback: unknown, timePosition: number, unwrappedTimePosition: number, rate: number, context: unknown) -> (),
 }
 type Sequence = {}
 type Playback = {

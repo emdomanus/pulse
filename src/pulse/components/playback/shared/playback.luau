@@ -35,10 +35,8 @@ type AddressInfo = PlaybackDefinitions.AddressInfo
 type BoundaryState = PlaybackTypes.BoundaryState
 type LoopChange = PlaybackDefinitions.LoopChange
 type PlaybackControl = PlaybackControlTypes.PlaybackControl
-type SequenceBoundary = SequenceTypes.SequenceBoundary
 type TraversalDirection = PlaybackVocabulary.TraversalDirection
 type Operation = PlaybackTypes.Operation
-type SampleInfo = PlaybackDefinitions.SampleInfo
 
 type PlaybackModule = {
 	new: <ContextT>(sequence: Sequence<ContextT>, context: ContextT, options: PlaybackOptions?) -> Playback,
@@ -48,11 +46,17 @@ local MAX_RECONCILIATION_WORK = 4_096
 
 local function noopRelease() end
 
-local function publicPosition(position: PlaybackPosition): PlaybackPosition
+local function localPosition(self: PlaybackImpl): number
+	local timePosition = self._sequence:positionComponents(self._position)
+	return timePosition
+end
+
+local function publicPosition(self: PlaybackImpl, position: number): PlaybackPosition
+	local timePosition, loopIndex = self._sequence:positionComponents(position)
 	return {
-		timePosition = position.timePosition,
-		loopIndex = position.loopIndex,
-		unwrappedTimePosition = position.unwrappedTimePosition,
+		timePosition = timePosition,
+		loopIndex = loopIndex,
+		unwrappedTimePosition = position,
 	}
 end
 
@@ -162,7 +166,7 @@ local function invokeEvent(self: PlaybackImpl, callback: (PlaybackControl, unkno
 	return self._terminalRequest == nil and self._completion == nil
 end
 
-local function emitAddress(self: PlaybackImpl, cause: AddressCause, mode: AddressMode, from: PlaybackPosition?): boolean
+local function emitAddress(self: PlaybackImpl, cause: AddressCause, mode: AddressMode, from: number?): boolean
 	local authored = self._sequence:getOnAddress()
 	if authored == nil then
 		return true
@@ -172,8 +176,10 @@ local function emitAddress(self: PlaybackImpl, cause: AddressCause, mode: Addres
 		requestTerminal(self, "failed", "catchUpLimitExceeded")
 		return false
 	end
-	local immutableFrom: PlaybackPositionSnapshot? = if from == nil then nil else table.freeze(publicPosition(from))
-	local immutableTarget: PlaybackPositionSnapshot = table.freeze(publicPosition(self._position))
+	local immutableFrom: PlaybackPositionSnapshot? = if from == nil
+		then nil
+		else table.freeze(publicPosition(self, from))
+	local immutableTarget: PlaybackPositionSnapshot = table.freeze(publicPosition(self, self._position))
 	local info: AddressInfo = table.freeze({
 		cause = cause,
 		mode = mode,
@@ -236,27 +242,13 @@ local function runEventsAt(self: PlaybackImpl, timePosition: number, forward: bo
 end
 
 local function completeForwardJoin(self: PlaybackImpl): boolean
-	local boundary = self._position
+	local _, loopIndex = self._sequence:positionComponents(self._position)
 	local change: LoopChange = {
-		fromLoopIndex = boundary.loopIndex,
-		toLoopIndex = boundary.loopIndex + 1,
+		fromLoopIndex = loopIndex - 1,
+		toLoopIndex = loopIndex,
 		direction = "forward",
 	}
-	if not emitLoop(self, change) then
-		return false
-	end
-	local nextPosition: PlaybackPosition = {
-		timePosition = 0,
-		loopIndex = boundary.loopIndex + 1,
-		unwrappedTimePosition = boundary.unwrappedTimePosition,
-	}
-	local nextBoundary = self._sequence:boundaryAt(nextPosition)
-	if nextBoundary == nil then
-		requestTerminal(self, "failed", "numericOverflow")
-		return false
-	end
-	self._position = nextBoundary
-	if not runEventsAt(self, 0, true) then
+	if not emitLoop(self, change) or not runEventsAt(self, 0, true) then
 		return false
 	end
 	self._direction = "forward"
@@ -265,28 +257,13 @@ local function completeForwardJoin(self: PlaybackImpl): boolean
 end
 
 local function completeBackwardJoin(self: PlaybackImpl): boolean
-	local boundary = self._position
-	local duration = self._sequence:getDuration()
+	local _, loopIndex = self._sequence:positionComponents(self._position)
 	local change: LoopChange = {
-		fromLoopIndex = boundary.loopIndex,
-		toLoopIndex = boundary.loopIndex - 1,
+		fromLoopIndex = loopIndex,
+		toLoopIndex = loopIndex - 1,
 		direction = "backward",
 	}
-	if not emitLoop(self, change) then
-		return false
-	end
-	local previousPosition: PlaybackPosition = {
-		timePosition = duration,
-		loopIndex = boundary.loopIndex - 1,
-		unwrappedTimePosition = boundary.unwrappedTimePosition,
-	}
-	local previousBoundary = self._sequence:boundaryAt(previousPosition)
-	if previousBoundary == nil then
-		requestTerminal(self, "failed", "numericOverflow")
-		return false
-	end
-	self._position = previousBoundary
-	if not runEventsAt(self, duration, false) then
+	if not emitLoop(self, change) or not runEventsAt(self, self._sequence:getDuration(), false) then
 		return false
 	end
 	self._direction = "backward"
@@ -296,7 +273,8 @@ end
 
 local function processBoundary(
 	self: PlaybackImpl,
-	boundary: SequenceBoundary,
+	boundaryTime: number,
+	boundary: number,
 	direction: TraversalDirection,
 	initial: boolean?
 ): boolean
@@ -304,14 +282,14 @@ local function processBoundary(
 	local duration = self._sequence:getDuration()
 	local looping = self._sequence:isLooping()
 	local forward = direction == "forward"
-	if looping and forward and boundary.timePosition == duration and initial ~= true then
+	if looping and forward and boundaryTime == duration and initial ~= true then
 		if not runEventsAt(self, duration, true) then
 			return false
 		end
 		self._direction = "forward"
 		self._boundaryState = "forwardJoinPending"
 		return completeForwardJoin(self)
-	elseif looping and not forward and boundary.timePosition == 0 and initial ~= true then
+	elseif looping and not forward and boundaryTime == 0 and initial ~= true then
 		if not runEventsAt(self, 0, false) then
 			return false
 		end
@@ -319,7 +297,7 @@ local function processBoundary(
 		self._boundaryState = "backwardJoinPending"
 		return completeBackwardJoin(self)
 	else
-		if not runEventsAt(self, boundary.timePosition, forward) then
+		if not runEventsAt(self, boundaryTime, forward) then
 			return false
 		end
 	end
@@ -334,7 +312,7 @@ local function prepareDirection(self: PlaybackImpl, direction: TraversalDirectio
 		if direction == "forward" then
 			return completeForwardJoin(self)
 		end
-		if not runEventsAt(self, self._position.timePosition, false) then
+		if not runEventsAt(self, self._sequence:getDuration(), false) then
 			return false
 		end
 		self._boundaryState = "before"
@@ -344,7 +322,7 @@ local function prepareDirection(self: PlaybackImpl, direction: TraversalDirectio
 		if direction == "backward" then
 			return completeBackwardJoin(self)
 		end
-		if not runEventsAt(self, self._position.timePosition, true) then
+		if not runEventsAt(self, localPosition(self), true) then
 			return false
 		end
 		self._boundaryState = "after"
@@ -355,21 +333,21 @@ local function prepareDirection(self: PlaybackImpl, direction: TraversalDirectio
 	end
 	self._direction = direction
 	if state == nil then
-		if self._sequence:isLooping() then
-			if direction == "forward" and self._position.timePosition == self._sequence:getDuration() then
-				self._boundaryState = "forwardJoinPending"
-				return completeForwardJoin(self)
-			elseif direction == "backward" and self._position.timePosition == 0 then
-				self._boundaryState = "backwardJoinPending"
-				return completeBackwardJoin(self)
-			end
+		if self._sequence:isLooping() and direction == "backward" and localPosition(self) == 0 then
+			self._boundaryState = "backwardJoinPending"
+			return completeBackwardJoin(self)
 		end
 		return true
 	end
 	if direction == "forward" and state == "before" then
-		return processBoundary(self, self._position, direction)
+		local boundaryTime = localPosition(self)
+		if self._sequence:isLooping() and boundaryTime == 0 and direction == "forward" then
+			boundaryTime = self._sequence:getDuration()
+		end
+		return processBoundary(self, boundaryTime, self._position, direction)
 	elseif direction == "backward" and state == "after" then
-		return processBoundary(self, self._position, direction)
+		local boundaryTime = localPosition(self)
+		return processBoundary(self, boundaryTime, self._position, direction)
 	end
 	return true
 end
@@ -383,9 +361,7 @@ local function prepareStationaryDirection(self: PlaybackImpl, direction: Travers
 		return true
 	elseif state == nil and self._sequence:isLooping() then
 		self._direction = direction
-		if direction == "forward" and self._position.timePosition == self._sequence:getDuration() then
-			self._boundaryState = "forwardJoinPending"
-		elseif direction == "backward" and self._position.timePosition == 0 then
+		if direction == "backward" and localPosition(self) == 0 then
 			self._boundaryState = "backwardJoinPending"
 		end
 		return true
@@ -401,7 +377,7 @@ local function finalizeAddressDirection(self: PlaybackImpl, direction: Traversal
 			return true
 		end
 		self._direction = direction
-		if not runEventsAt(self, self._position.timePosition, false) then
+		if not runEventsAt(self, self._sequence:getDuration(), false) then
 			return false
 		end
 		self._boundaryState = "before"
@@ -412,7 +388,7 @@ local function finalizeAddressDirection(self: PlaybackImpl, direction: Traversal
 			return true
 		end
 		self._direction = direction
-		if not runEventsAt(self, self._position.timePosition, true) then
+		if not runEventsAt(self, localPosition(self), true) then
 			return false
 		end
 		self._boundaryState = "after"
@@ -420,7 +396,7 @@ local function finalizeAddressDirection(self: PlaybackImpl, direction: Traversal
 	end
 	if
 		self._sequence:isLooping()
-		and self._position.timePosition == 0
+		and localPosition(self) == 0
 		and state == "after"
 		and direction == "backward"
 		and self._direction ~= direction
@@ -435,68 +411,50 @@ local function finalizeAddressDirection(self: PlaybackImpl, direction: Traversal
 	return prepareDirection(self, direction)
 end
 
-local function selectNextBoundary(self: PlaybackImpl, direction: TraversalDirection): SequenceBoundary?
-	local ok, boundary = pcall(self._sequence.nextBoundary, self._sequence, self._position, direction)
+local function selectNextBoundary(self: PlaybackImpl, direction: TraversalDirection): (number?, number?)
+	local ok, boundaryTime, boundary = pcall(self._sequence.nextBoundary, self._sequence, self._position, direction)
 	if not ok then
 		requestTerminal(self, "failed", "numericOverflow")
-		return nil
+		return nil, nil
 	end
-	return boundary
+	return boundaryTime, boundary
 end
 
-local function reconcileTo(self: PlaybackImpl, target: PlaybackPosition, direction: TraversalDirection): boolean
+local function reconcileTo(self: PlaybackImpl, target: number, direction: TraversalDirection): boolean
 	if not prepareDirection(self, direction) then
 		return false
 	end
-
 	while true do
-		local boundary = selectNextBoundary(self, direction)
+		local boundaryTime, boundary = selectNextBoundary(self, direction)
 		if self._terminalRequest ~= nil then
 			return false
 		end
-		local crossed = boundary ~= nil
-			and if direction == "forward"
-				then boundary.unwrappedTimePosition <= target.unwrappedTimePosition
-				else boundary.unwrappedTimePosition >= target.unwrappedTimePosition
-		if not crossed or boundary == nil then
+		if boundaryTime == nil or boundary == nil then
+			break
+		end
+		local crossed = if direction == "forward" then boundary <= target else boundary >= target
+		if not crossed then
 			break
 		end
 		if
-			(direction == "forward" and boundary.unwrappedTimePosition <= self._position.unwrappedTimePosition)
-			or (direction == "backward" and boundary.unwrappedTimePosition >= self._position.unwrappedTimePosition)
+			(direction == "forward" and boundary <= self._position)
+			or (direction == "backward" and boundary >= self._position)
 		then
 			requestTerminal(self, "failed", "numericOverflow")
 			return false
 		end
-		local exactDurationTarget = self._sequence:isLooping()
-			and direction == "forward"
-			and target.timePosition == self._sequence:getDuration()
-			and boundary.timePosition == target.timePosition
-			and boundary.loopIndex == target.loopIndex
-			and boundary.unwrappedTimePosition == target.unwrappedTimePosition
-		if exactDurationTarget then
-			self._position = boundary
-			self._direction = "forward"
-			if not runEventsAt(self, boundary.timePosition, true) then
-				return false
-			end
-			self._boundaryState = "forwardJoinPending"
-			break
-		else
-			if not processBoundary(self, boundary, direction) then
-				return false
-			end
+		if not processBoundary(self, boundaryTime, boundary, direction) then
+			return false
 		end
 	end
-
-	if self._position.unwrappedTimePosition ~= target.unwrappedTimePosition then
+	if self._position ~= target then
 		self._position = target
 		self._boundaryState = nil
 	end
 	return true
 end
 
-local function beginGeneration(self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean): boolean
+local function beginGeneration(self: PlaybackImpl, target: number, disposeCurrent: boolean): boolean
 	if disposeCurrent and not disposeGeneration(self) then
 		requestTerminal(self, "failed", "cleanupFailed")
 		return false
@@ -512,42 +470,26 @@ local function beginGeneration(self: PlaybackImpl, target: PlaybackPosition, dis
 	return true
 end
 
-local function reconstructTo(self: PlaybackImpl, target: PlaybackPosition, disposeCurrent: boolean): boolean
+local function reconstructTo(self: PlaybackImpl, target: number, disposeCurrent: boolean): boolean
 	if not beginGeneration(self, target, disposeCurrent) then
 		return false
 	end
-	local base = self._sequence:validateAddress({
-		timePosition = 0,
-		loopIndex = target.loopIndex,
-	})
-	local baseBoundary = self._sequence:boundaryAt(base)
-	if baseBoundary == nil then
-		requestTerminal(self, "failed", "numericOverflow")
-		return false
-	end
-	self._position = baseBoundary
+	local _, loopIndex = self._sequence:positionComponents(target)
+	local base = self._sequence:positionAt(loopIndex * self._sequence:getDuration())
+	self._position = base
 	self._direction = "forward"
 	self._boundaryState = "before"
-	if not processBoundary(self, baseBoundary, "forward", true) then
+	if not processBoundary(self, 0, base, "forward", true) then
 		return false
 	end
-	if target.unwrappedTimePosition > base.unwrappedTimePosition and not reconcileTo(self, target, "forward") then
-		return false
-	end
-	return true
+	return target <= base or reconcileTo(self, target, "forward")
 end
 
-local function placeWithoutTraversal(self: PlaybackImpl, target: PlaybackPosition, direction: TraversalDirection?)
-	local boundary = self._sequence:boundaryAt(target)
-	self._position = boundary or target
-	if boundary ~= nil and direction ~= nil then
-		if
-			self._sequence:isLooping()
-			and direction == "forward"
-			and target.timePosition == self._sequence:getDuration()
-		then
-			self._boundaryState = "forwardJoinPending"
-		elseif self._sequence:isLooping() and direction == "backward" and target.timePosition == 0 then
+local function placeWithoutTraversal(self: PlaybackImpl, target: number, direction: TraversalDirection?)
+	local boundaryTime = self._sequence:boundaryAt(target)
+	self._position = target
+	if boundaryTime ~= nil and direction ~= nil then
+		if self._sequence:isLooping() and direction == "backward" and boundaryTime == 0 then
 			self._boundaryState = "backwardJoinPending"
 		else
 			self._boundaryState = if direction == "forward" then "after" else "before"
@@ -560,12 +502,12 @@ end
 
 local function applyAddressTarget(
 	self: PlaybackImpl,
-	target: PlaybackPosition,
+	target: number,
 	mode: AddressMode,
 	cause: AddressCause,
 	direction: TraversalDirection?
 ): boolean
-	local from = publicPosition(self._position)
+	local from = self._position
 	if mode == "reconstruct" then
 		if not reconstructTo(self, target, true) then
 			return false
@@ -607,7 +549,7 @@ local function derivePosition(self: PlaybackImpl, sourcePositionValue: number): 
 	return if isFinite(delta) and isFinite(position) then position else nil
 end
 
-local function positionAt(self: PlaybackImpl, unwrappedTimePosition: number): PlaybackPosition?
+local function positionAt(self: PlaybackImpl, unwrappedTimePosition: number): number?
 	local ok, position = pcall(self._sequence.positionAt, self._sequence, unwrappedTimePosition)
 	if not ok then
 		requestTerminal(self, "failed", "numericOverflow")
@@ -625,7 +567,7 @@ local function reanchor(self: PlaybackImpl)
 	local sourcePosition = self._acceptedSourcePosition
 	if sourcePosition ~= nil then
 		self._anchorSource = sourcePosition
-		self._anchorSequence = self._position.unwrappedTimePosition
+		self._anchorSequence = self._position
 	end
 end
 
@@ -635,13 +577,13 @@ local function desiredDirection(self: PlaybackImpl): TraversalDirection?
 end
 
 local function requiresPhaseEvaluation(self: PlaybackImpl): boolean
-	local localPosition = self._position.timePosition
+	local timePosition = localPosition(self)
 	local direction = desiredDirection(self)
 	for _, sample in self._sequence:getSamples() do
-		if localPosition >= sample.startTime and localPosition < sample.endTime then
+		if timePosition >= sample.startTime and timePosition < sample.endTime then
 			return true
 		end
-		if direction == "backward" and localPosition == sample.endTime then
+		if direction == "backward" and timePosition == sample.endTime then
 			return true
 		end
 	end
@@ -659,20 +601,15 @@ local function runSamples(self: PlaybackImpl): boolean
 		requestTerminal(self, "failed", "numericOverflow")
 		return false
 	end
-	local info: SampleInfo? = nil
-	local localPosition = self._position.timePosition
+	local timePosition = localPosition(self)
 	for _, sample in self._sequence:getSamples() do
-		if localPosition >= sample.startTime and localPosition < sample.endTime then
+		if timePosition >= sample.startTime and timePosition < sample.endTime then
 			self._workCount += 1
 			if self._workCount > MAX_RECONCILIATION_WORK then
 				requestTerminal(self, "failed", "catchUpLimitExceeded")
 				return false
 			end
-			if info == nil then
-				local immutablePosition: PlaybackPositionSnapshot = table.freeze(publicPosition(self._position))
-				info = table.freeze({ position = immutablePosition, rate = effectiveRate })
-			end
-			if not pcall(sample.run, asControl(self), info :: SampleInfo, self._context) then
+			if not pcall(sample.run, asControl(self), timePosition, self._position, effectiveRate, self._context) then
 				requestTerminal(self, "failed", "callbackFailed")
 				return false
 			end
@@ -694,10 +631,7 @@ local function completeIfOutward(self: PlaybackImpl)
 		return
 	end
 	local direction = desiredDirection(self)
-	if
-		(direction == "forward" and self._position.unwrappedTimePosition >= duration)
-		or (direction == "backward" and self._position.unwrappedTimePosition <= 0)
-	then
+	if (direction == "forward" and self._position >= duration) or (direction == "backward" and self._position <= 0) then
 		requestTerminal(self, "completed", nil)
 	end
 end
@@ -738,7 +672,7 @@ local function evaluateSample(self: PlaybackImpl, sourcePosition: number, source
 		requestTerminal(self, "failed", "numericOverflow")
 		return
 	end
-	local currentCoordinate = self._position.unwrappedTimePosition
+	local currentCoordinate = self._position
 	local moved = targetCoordinate ~= currentCoordinate
 	if moved then
 		local target = positionAt(self, targetCoordinate)
@@ -800,7 +734,7 @@ local function applySpeed(self: PlaybackImpl, speed: number)
 	end
 end
 
-local function applySeek(self: PlaybackImpl, target: PlaybackPosition, mode: AddressMode)
+local function applySeek(self: PlaybackImpl, target: number, mode: AddressMode)
 	if self._status ~= "playing" and self._status ~= "paused" then
 		return
 	end
@@ -904,12 +838,11 @@ local function ConstructPlayback<ContextT>(sequence: Sequence<ContextT>, context
 			_completion = nil,
 			_playbackSpeed = speed,
 			_anchorSource = 0,
-			_anchorSequence = initial.unwrappedTimePosition,
+			_anchorSequence = initial,
 			_acceptedSourcePosition = nil,
 			_acceptedSourceRate = nil,
 			_resumePending = false,
 			_position = initial,
-			_forecastBoundary = { timePosition = 0, loopIndex = 0, unwrappedTimePosition = 0 },
 			_initialPosition = initial,
 			_initialMode = initialMode,
 			_boundaryState = nil,
@@ -936,7 +869,7 @@ function Playback.play(self: PlaybackImpl, sample: TimeSample): Playback
 	self._status = "playing"
 	acceptSampleValues(self, sourcePosition, sourceRate)
 	self._anchorSource = sourcePosition
-	self._anchorSequence = self._initialPosition.unwrappedTimePosition
+	self._anchorSequence = self._initialPosition
 	self._position = self._initialPosition
 
 	self._busy = true
@@ -1029,14 +962,14 @@ function Playback.seek(self: PlaybackImpl, address: SequenceAddress, mode: Addre
 end
 
 function Playback.getPosition(self: PlaybackImpl): PlaybackPosition
-	return publicPosition(self._position)
+	return publicPosition(self, self._position)
 end
 
 function Playback.writePositionInto(self: PlaybackImpl, output: PlaybackPosition)
-	local position = self._position
-	output.timePosition = position.timePosition
-	output.loopIndex = position.loopIndex
-	output.unwrappedTimePosition = position.unwrappedTimePosition
+	local timePosition, loopIndex = self._sequence:positionComponents(self._position)
+	output.timePosition = timePosition
+	output.loopIndex = loopIndex
+	output.unwrappedTimePosition = self._position
 end
 
 function Playback.getStatus(self: PlaybackImpl): Status
@@ -1156,23 +1089,16 @@ function Playback.writeTraversalForecastInto(self: PlaybackImpl, output: Travers
 	if direction == nil or acceptedSourceDirection == nil then
 		return
 	end
-	local boundary = self._forecastBoundary
-	local ok, found = pcall(
-		self._sequence.nextBoundaryInto,
-		self._sequence,
-		self._position,
-		direction :: TraversalDirection,
-		boundary
-	)
+	local ok, _, boundary =
+		pcall(self._sequence.nextBoundary, self._sequence, self._position, direction :: TraversalDirection)
 	if not ok then
 		requestTerminal(self, "failed", "numericOverflow")
 		return
 	end
-	if not found or self._terminalRequest ~= nil then
+	if boundary == nil or self._terminalRequest ~= nil then
 		return
 	end
-	local sourceBoundary = self._anchorSource
-		+ (boundary.unwrappedTimePosition - self._anchorSequence) / self._playbackSpeed
+	local sourceBoundary = self._anchorSource + (boundary - self._anchorSequence) / self._playbackSpeed
 	if not isFinite(sourceBoundary) then
 		output.phaseRequired = false
 		requestTerminal(self, "failed", "numericOverflow")
@@ -1183,7 +1109,7 @@ function Playback.writeTraversalForecastInto(self: PlaybackImpl, output: Travers
 end
 
 function Playback.validateAddress(self: PlaybackImpl, address: SequenceAddress): SequenceAddress
-	return self._sequence:validateAddress(address)
+	return publicPosition(self, self._sequence:validateAddress(address))
 end
 
 function Playback.projectSourcePosition(self: PlaybackImpl, sourcePositionValue: number): PlaybackPosition?
@@ -1193,7 +1119,8 @@ function Playback.projectSourcePosition(self: PlaybackImpl, sourcePositionValue:
 		requestTerminal(self, "failed", "numericOverflow")
 		return nil
 	end
-	return positionAt(self, target)
+	local position = positionAt(self, target)
+	return if position == nil then nil else publicPosition(self, position)
 end
 
 function Playback.acceptSourceSample(self: PlaybackImpl, sample: TimeSample)

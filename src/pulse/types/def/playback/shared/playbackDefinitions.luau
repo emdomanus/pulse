@@ -26,16 +26,11 @@ export type PlaybackPosition = {
 	unwrappedTimePosition: number,
 }
 
--- Callback payloads are frozen; writePositionInto still accepts mutable PlaybackPosition.
+-- Address position snapshots are frozen; writePositionInto accepts mutable PlaybackPosition.
 export type PlaybackPositionSnapshot = {
 	read timePosition: number,
 	read loopIndex: number,
 	read unwrappedTimePosition: number,
-}
-
-export type SampleInfo = {
-	read position: PlaybackPositionSnapshot,
-	read rate: number,
 }
 
 export type AddressInfo = {

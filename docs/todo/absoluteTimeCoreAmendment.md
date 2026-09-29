@@ -2,6 +2,10 @@
 
 Status: accepted and implemented
 
+The subsequent scalar-position change replaces this record's `SampleInfo` payload and distinct
+loop-end address representation. See the current [Architecture](../architecture.md#traversal-and-sampling)
+and [Sample callback](../api/components/sequence.md#sample) contract; this document retains the original decision record.
+
 Date: 2026-08-17
 
 ## Relationship to the temporal scheduling amendment

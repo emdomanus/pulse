@@ -7,17 +7,21 @@ local PlaybackDefinitions = require(script.Parent.Parent.Parent.Parent.def.playb
 
 local PlaybackVocabulary = require(script.Parent.Parent.Parent.Parent.Parent.common.playback.shared.playbackVocabulary)
 
-type PlaybackPosition = PlaybackDefinitions.PlaybackPosition
 type SequenceAddress = PlaybackDefinitions.SequenceAddress
 type TraversalDirection = PlaybackVocabulary.TraversalDirection
 type AddressInfo = PlaybackDefinitions.AddressInfo
 type LoopChange = PlaybackDefinitions.LoopChange
 type PlaybackControl = PlaybackControlTypes.PlaybackControl
-type SampleInfo = PlaybackDefinitions.SampleInfo
 
 export type EventCallback<ContextT> = (playback: PlaybackControl, context: ContextT) -> ()
 export type AddressCallback<ContextT> = (playback: PlaybackControl, info: AddressInfo, context: ContextT) -> ()
-export type SampleCallback<ContextT> = (playback: PlaybackControl, sample: SampleInfo, context: ContextT) -> ()
+export type SampleCallback<ContextT> = (
+	playback: PlaybackControl,
+	timePosition: number,
+	unwrappedTimePosition: number,
+	rate: number,
+	context: ContextT
+) -> ()
 export type LoopCallback<ContextT> = (playback: PlaybackControl, change: LoopChange, context: ContextT) -> ()
 
 export type Event<ContextT> = {
@@ -44,12 +48,6 @@ export type CompiledSample<ContextT> = {
 	read endTime: number,
 	read authorIndex: number,
 	read run: SampleCallback<ContextT>,
-}
-
-export type SequenceBoundary = {
-	timePosition: number,
-	loopIndex: number,
-	unwrappedTimePosition: number,
 }
 
 export type SequenceDefinition<ContextT> = {
@@ -85,20 +83,16 @@ export type SequenceState<ContextT> = {
 
 -- Complete compiled view retained by Playback; the package facade exposes only Sequence.
 export type SequenceStored<ContextT> = Sequence<ContextT> & {
-	read validateAddress: (self: SequenceStored<ContextT>, address: SequenceAddress) -> PlaybackPosition,
-	read positionAt: (self: SequenceStored<ContextT>, unwrappedTimePosition: number) -> PlaybackPosition,
+	read validateAddress: (self: SequenceStored<ContextT>, address: SequenceAddress) -> number,
+	read positionAt: (self: SequenceStored<ContextT>, unwrappedTimePosition: number) -> number,
+	read positionComponents: (self: SequenceStored<ContextT>, unwrappedTimePosition: number) -> (number, number),
 	read nextBoundary: (
 		self: SequenceStored<ContextT>,
-		position: PlaybackPosition,
+		position: number,
 		direction: TraversalDirection
-	) -> SequenceBoundary?,
-	read nextBoundaryInto: (
-		self: SequenceStored<ContextT>,
-		position: PlaybackPosition,
-		direction: TraversalDirection,
-		output: SequenceBoundary
-	) -> boolean,
-	read boundaryAt: (self: SequenceStored<ContextT>, position: PlaybackPosition) -> SequenceBoundary?,
+	) -> (number?, number?),
+	read boundaryAt: (self: SequenceStored<ContextT>, position: number) -> number?,
+
 	read eventRangeAt: (self: SequenceStored<ContextT>, localTimePosition: number) -> (number, number),
 	read getEvent: (self: SequenceStored<ContextT>, index: number) -> CompiledEvent<ContextT>,
 	read getSamples: (self: SequenceStored<ContextT>) -> { CompiledSample<ContextT> },

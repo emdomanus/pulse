@@ -28,13 +28,13 @@ integrates a release, also verify the current Studio harness against Roblox exec
 - an ordinary event-only driven Playback keeps one deadline and no phase binding;
 - backward arrival at a Sample's excluded end emits no Sample there, retains shared phase
   observation, and samples the first position inside the interval;
-- event-only duration-side/zero-side pending loop joins retain exact identity while stationary,
+- duration seeks normalize to the next loop start; pending backward zero joins remain stationary,
   use transient phase observation, and consume the join on the first actual outward movement;
 - sampled Playbacks sharing one driver perform one provider read per ordinary phase notification
   and do not reschedule unchanged deadlines;
 - large forward/backward and repeated loops preserve event, reverse, and loop ordering while the
   final Sample runs once;
-- exact loop joins preserve the requested `timePosition` and `loopIndex`;
+- exact loop joins normalize to local zero of the next loop, including fractional durations;
 - event, reverse, Sample, setup, address, and loop callbacks receive the same context identity;
 - initial skip suppresses historical Events while `onAddress` and active Samples materialize the
   target in order;

@@ -84,7 +84,7 @@ type SequenceAddress = {
 zero, must be an exactly representable integer, and must be zero for a non-looping Sequence.
 
 At a loop join, `{ timePosition = duration, loopIndex = n }` and `{ timePosition = 0, loopIndex = n
-+ 1 }` are distinct exact addresses with the same unwrapped coordinate.
++ 1 }` normalize to the same next-loop start. Non-looping sequences retain `duration` as their endpoint.
 
 <a id="playback-position"></a>
 ## PlaybackPosition
@@ -103,7 +103,9 @@ type PlaybackPosition = {
 | `loopIndex` | Signed logical cycle identity; zero for a non-looping Sequence |
 | `unwrappedTimePosition` | Absolute sequence coordinate used by anchors and traversal |
 
-Public reads return new records; callback records freeze nested positions.
+Public reads return new records; address callback records freeze nested positions. Looping
+local time is in `[0, duration)`; non-looping time is clamped to `[0, duration]`. Sample callbacks
+receive scalar local time, unwrapped time, and rate rather than a position record.
 
 <a id="playback-position-snapshot"></a>
 ## PlaybackPositionSnapshot
@@ -116,21 +118,7 @@ type PlaybackPositionSnapshot = {
 }
 ```
 
-The frozen position view used by callback payloads.
-
-<a id="sample-info"></a>
-## SampleInfo
-
-```luau
-type SampleInfo = {
-	read position: PlaybackPositionSnapshot,
-	read rate: number,
-}
-```
-
-The immutable record passed to an active `Sample.run`. `position` is the final absolute Playback
-position for this evaluation. `rate` is `TimeSample.rate * playbackSpeed`, so it is signed and may
-be zero. There is intentionally no delta field.
+The frozen position view used by `AddressInfo.from` and `AddressInfo.target`.
 
 <a id="address-info"></a>
 ## AddressInfo
@@ -145,8 +133,8 @@ type AddressInfo = {
 ```
 
 An immutable report delivered to `SequenceDefinition.onAddress`. `from` is `nil` for initial
-placement and is the accepted pre-seek cursor for a later explicit seek. `target` preserves loop
-and authored-boundary identity.
+placement and is the accepted pre-seek cursor for a later explicit seek. `target` uses canonical
+loop coordinates: exact loop multiples are the next loop's zero, including explicit duration addresses.
 
 <a id="loop-change"></a>
 ## LoopChange
@@ -203,6 +191,6 @@ cancellation or by a deterministic core/driver failure.
 
 `PlaybackPosition` is writable and remains the output buffer for `writePositionInto`.
 `PlaybackPositionSnapshot` has the same coordinates with read-only fields and is used by
-`SampleInfo.position` and `AddressInfo.from`/`target`. `SampleInfo`, `AddressInfo`, `LoopChange`,
+`AddressInfo.from`/`target`. `AddressInfo`, `LoopChange`,
 and `Completion` are frozen callback records; their fields are read-only in the type surface.
 `SequenceAddress` is a read-only input view. Public object methods cannot be reassigned.

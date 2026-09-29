@@ -35,7 +35,9 @@ type Sample<ContextT> = {
 	endTime: number?,
 	run: (
 		playback: PlaybackControl,
-		sample: SampleInfo,
+		timePosition: number,
+		unwrappedTimePosition: number,
+		rate: number,
 		context: ContextT
 	) -> (),
 }
@@ -44,8 +46,11 @@ type Sample<ContextT> = {
 The interval defaults to the full sequence and must satisfy
 `0 <= startTime < endTime <= duration`. Membership is direction-independent and half-open:
 `[startTime, endTime)`. Each active Sample runs once after a natural evaluation reaches its final
-position, after an initial address, and after a seek. `SampleInfo` contains the absolute final
-Playback position and signed effective rate, with no delta.
+position, after an initial address, and after a seek. Callbacks receive the final local time,
+unwrapped sequence time, and signed effective rate (`TimeSample.rate * playbackSpeed`) as numbers,
+followed by the per-play context. There is no delta and no Pulse-owned sample payload table.
+Consumers that need a record can write these values into their own buffer. Looping local time is
+in `[0, duration)`; a non-looping endpoint remains `duration` and is excluded from every Sample.
 
 A large or multi-loop jump traverses every crossed Event but runs an active Sample only once at the
 final position. Equal-coordinate evaluation may run it once again without duplicating Events.
